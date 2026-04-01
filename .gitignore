@@ -1,0 +1,4 @@
+.env*
+*/
+
+# Pour inclure des dossier, il faut ajouter ! au début (ex: !src/
