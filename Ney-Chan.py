@@ -27,6 +27,10 @@ def _is_termux():
 
 IS_TERMUX  = _is_termux()
 IS_WINDOWS = os.name == "nt"
+IS_PC      = not IS_TERMUX   # PC = tout sauf Termux/Android
+
+# Callback de progression pour l'interface Qt (None = mode console)
+_qt_progress_callback = None  # pylint: disable=invalid-name
 
 try:
     import msvcrt
@@ -311,6 +315,1022 @@ class ConsoleUI:
     def err(m):     print(f"  {ConsoleUI.RED}X  {ConsoleUI.RESET}{m}")
     @staticmethod
     def sep():      print(f"\n  {ConsoleUI.DIM}{'-'*54}{ConsoleUI.RESET}\n")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Interface PyQt6 — PC uniquement (Windows / Linux desktop)
+#  Termux/Android conserve l'interface console existante (ConsoleUI).
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Import PyQt6 (optionnel) ──────────────────────────────────────────────────
+PYQT_AVAILABLE = False  # pylint: disable=invalid-name
+
+if IS_PC:
+    try:
+        from PyQt6.QtWidgets import (  # pylint: disable=import-error
+            QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+            QPushButton, QLabel, QLineEdit, QListWidget, QProgressBar,
+            QTextEdit, QStackedWidget, QFileDialog, QMessageBox, QSpinBox,
+        )
+        from PyQt6.QtCore import (  # pylint: disable=import-error
+            Qt, QThread, pyqtSignal,
+        )
+        from PyQt6.QtGui import QFont  # pylint: disable=import-error
+        PYQT_AVAILABLE = True
+    except ImportError:
+        pass
+
+# Stubs minimalistes pour que les définitions de classes ne lèvent pas NameError
+# quand PyQt6 est absent — elles ne seront jamais instanciées dans ce cas.
+if not PYQT_AVAILABLE:
+    class QThread:          # pylint: disable=too-few-public-methods
+        """Stub QThread."""
+    class QMainWindow:      # pylint: disable=too-few-public-methods
+        """Stub QMainWindow."""
+    def pyqtSignal(*_a, **_k):  # pylint: disable=invalid-name
+        """Stub pyqtSignal."""
+        return None
+
+
+# ── Feuille de style (thème sombre anime) ────────────────────────────────────
+_QSS = """
+QMainWindow, QWidget {
+    background-color: #0d0d1a;
+    color: #e0e8ff;
+    font-family: Consolas, "Courier New", monospace;
+}
+QLabel#title {
+    color: #00d4ff;
+    font-size: 14px;
+    font-weight: bold;
+}
+QLabel#subtitle { color: #666680; font-size: 11px; }
+QPushButton {
+    background-color: #12122a;
+    color: #00d4ff;
+    border: 1px solid #00d4ff44;
+    border-radius: 5px;
+    padding: 7px 16px;
+    font-family: Consolas, "Courier New", monospace;
+}
+QPushButton:hover  { background-color: #00d4ff; color: #0d0d1a; }
+QPushButton:disabled { color: #333344; border-color: #333344; }
+QPushButton#danger { color: #ff6b6b; border-color: #ff6b6b44; }
+QPushButton#danger:hover  { background-color: #ff6b6b; color: #0d0d1a; }
+QPushButton#success { color: #00ff99; border-color: #00ff9944; }
+QListWidget {
+    background-color: #0f0f22;
+    border: 1px solid #1e1e3a;
+    border-radius: 5px;
+    color: #e0e8ff;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    outline: none;
+}
+QListWidget::item { padding: 7px 10px; border-bottom: 1px solid #1a1a30; }
+QListWidget::item:selected {
+    background-color: #00d4ff18;
+    color: #00d4ff;
+    border-left: 3px solid #00d4ff;
+}
+QListWidget::item:hover { background-color: #181830; }
+QLineEdit {
+    background-color: #0f0f22;
+    border: 1px solid #1e1e3a;
+    border-radius: 5px;
+    color: #e0e8ff;
+    padding: 6px 10px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+QLineEdit:focus { border-color: #00d4ff; }
+QSpinBox {
+    background-color: #0f0f22;
+    border: 1px solid #1e1e3a;
+    border-radius: 5px;
+    color: #e0e8ff;
+    padding: 4px 8px;
+    font-size: 14px;
+}
+QSpinBox:focus { border-color: #00d4ff; }
+QSpinBox::up-button, QSpinBox::down-button { background: #1a1a2e; border: none; }
+QProgressBar {
+    background-color: #0f0f22;
+    border: 1px solid #1e1e3a;
+    border-radius: 5px;
+    text-align: center;
+    color: #e0e8ff;
+    font-size: 10px;
+}
+QProgressBar::chunk { background-color: #00d4ff; border-radius: 4px; }
+QTextEdit {
+    background-color: #080814;
+    border: 1px solid #1e1e3a;
+    border-radius: 5px;
+    color: #666680;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 10px;
+}
+QScrollBar:vertical { background: #0f0f22; width: 8px; border-radius: 4px; }
+QScrollBar::handle:vertical { background: #2a2a4a; border-radius: 4px; min-height: 20px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QMessageBox { background-color: #12122a; }
+"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Threads
+# ══════════════════════════════════════════════════════════════════════════════
+
+class InitThread(QThread):
+    """Thread d'initialisation : installe les dépendances et cherche FFmpeg."""
+
+    progress = pyqtSignal(str)   # message de statut
+    finished = pyqtSignal(str)   # chemin ffmpeg_exe (ou "" si introuvable)
+
+    def run(self):
+        """Exécution dans le thread."""
+        self.progress.emit("Installation des dépendances...")
+        setup_dependencies()
+        self.progress.emit("Recherche de FFmpeg...")
+        ffmpeg = setup_ffmpeg()
+        self.finished.emit(ffmpeg or "")
+
+
+class LoadAnimeThread(QThread):
+    """Thread de chargement des données d'un anime (local → GitHub → scraping)."""
+
+    finished = pyqtSignal(object)   # dict anime_data ou None
+
+    def __init__(self, slug, cfg, parent=None):
+        super().__init__(parent)
+        self.slug = slug
+        self.cfg  = cfg
+
+    def run(self):
+        """Exécution dans le thread."""
+        data = load_anime_local(self.slug)
+        if data is None and self.cfg.get("github_fallback") and GITHUB_TOKEN:
+            data = load_anime_github(self.slug)
+        if data is None:
+            data = scrape_anime_data(self.slug)
+        self.finished.emit(data)
+
+
+class DownloadThread(QThread):
+    """Thread de téléchargement des épisodes."""
+
+    ep_start    = pyqtSignal(int, int, str)    # numéro courant, total, nom
+    ep_progress = pyqtSignal(float, str, str)  # pct, vitesse, eta
+    ep_done     = pyqtSignal(bool, str)        # succès, nom de fichier
+    all_done    = pyqtSignal(int, int)         # succès total, échecs total
+
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+            self, slug, anime_data, lang, saison_key, ep_range,
+            dest_dir, anime_name, ffmpeg_exe, parent=None):
+        super().__init__(parent)
+        self.slug        = slug
+        self.anime_data  = anime_data
+        self.lang        = lang
+        self.saison_key  = saison_key
+        self.ep_range    = ep_range
+        self.dest_dir    = dest_dir
+        self.anime_name  = anime_name
+        self.ffmpeg_exe  = ffmpeg_exe
+        self._cancelled  = False
+
+    def cancel(self):
+        """Demande l'annulation du téléchargement."""
+        self._cancelled = True
+
+    def run(self):  # pylint: disable=too-many-locals
+        """Exécution dans le thread."""
+        global _qt_progress_callback  # pylint: disable=global-statement
+
+        def _hook(d):
+            if d["status"] == "downloading":
+                pct_str = d.get("_percent_str", "0%").strip()
+                speed   = d.get("_speed_str",   "").strip()
+                eta     = d.get("_eta_str",     "").strip()
+                try:
+                    pct = float(pct_str.replace("%", "").strip())
+                except ValueError:
+                    pct = 0.0
+                self.ep_progress.emit(pct, speed, eta)
+
+        _qt_progress_callback = _hook
+        blocs      = self.anime_data.get(self.lang, {}).get(self.saison_key, [])
+        total_eps  = count_episodes(blocs)
+        ep_start_i = max(0, self.ep_range[0])
+        ep_end_i   = min(self.ep_range[1], total_eps - 1)
+        total      = ep_end_i - ep_start_i + 1
+        success    = fail = 0
+        try:
+            for i, ep_idx in enumerate(range(ep_start_i, ep_end_i + 1)):
+                if self._cancelled:
+                    break
+                base_name = ep_filename(self.saison_key, ep_idx)
+                self.ep_start.emit(i + 1, total, base_name)
+                ok = download_episode(
+                    self.slug, self.saison_key, ep_idx, blocs,
+                    self.dest_dir, self.anime_name, self.lang, self.ffmpeg_exe,
+                )
+                self.ep_done.emit(ok, base_name)
+                if ok:
+                    success += 1
+                else:
+                    fail += 1
+            self.all_done.emit(success, fail)
+        finally:
+            _qt_progress_callback = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  NeyChanWindow — fenêtre principale PyQt6
+# ══════════════════════════════════════════════════════════════════════════════
+
+class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes,too-many-public-methods
+    """Fenêtre principale de Ney-Chan (interface PyQt6, PC uniquement)."""
+
+    # Indices des pages dans le QStackedWidget
+    PAGE_INIT     = 0
+    PAGE_MAIN     = 1
+    PAGE_SEARCH   = 2
+    PAGE_LIST     = 3
+    PAGE_EP_INPUT = 4
+    PAGE_SETTINGS = 5
+    PAGE_DOWNLOAD = 6
+
+    def __init__(self, cfg, dest_dir_ref, ffmpeg_exe):
+        super().__init__()
+        self.cfg           = cfg
+        self.dest_dir_ref  = dest_dir_ref   # list[str] — référence mutable
+        self.ffmpeg_exe    = ffmpeg_exe
+
+        # État de navigation
+        self._slug         = ""
+        self._anime_data   = None
+        self._anime_name   = ""
+        self._lang         = ""
+        self._saison_key   = ""
+        self._list_cb      = None
+        self._list_back    = self.PAGE_MAIN
+        self._ep_cb        = None
+        self._ep_back      = self.PAGE_LIST
+        self._dl_thread    = None
+        self._dl_queue     = []
+        self._dl_queue_ctx = None
+        self._dl_queue_res = (0, 0)
+
+        self._setup_window()
+        self._build_ui()
+
+    # ── Fenêtre ────────────────────────────────────────────────────────────────
+
+    def _setup_window(self):
+        self.setWindowTitle(f"Ney-Chan v{VERSION} — Anime Downloader")
+        self.setMinimumSize(820, 580)
+        self.resize(920, 660)
+        self.setStyleSheet(_QSS)
+
+    def _build_ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        vlay = QVBoxLayout(root)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+
+        vlay.addWidget(self._make_header())
+
+        self._stack = QStackedWidget()
+        vlay.addWidget(self._stack, 1)
+
+        self._status_lbl = QLabel()
+        self._status_lbl.setObjectName("subtitle")
+        self._status_lbl.setContentsMargins(14, 4, 14, 4)
+        vlay.addWidget(self._status_lbl)
+
+        for builder in (
+            self._build_page_init,
+            self._build_page_main,
+            self._build_page_search,
+            self._build_page_list,
+            self._build_page_ep_input,
+            self._build_page_settings,
+            self._build_page_download,
+        ):
+            self._stack.addWidget(builder())
+
+        self._refresh_status()
+
+    def _make_header(self):
+        frame = QWidget()
+        frame.setFixedHeight(68)
+        frame.setStyleSheet(
+            "background-color:#080814; border-bottom:1px solid #00d4ff22;"
+        )
+        hlay = QHBoxLayout(frame)
+        hlay.setContentsMargins(18, 8, 18, 8)
+
+        vlay = QVBoxLayout()
+        t1 = QLabel("🎌  NEY-CHAN")
+        t1.setStyleSheet("color:#00d4ff; font-size:20px; font-weight:bold;")
+        t2 = QLabel("A N I M E   D O W N L O A D E R")
+        t2.setStyleSheet("color:#333355; font-size:9px; letter-spacing:3px;")
+        vlay.addWidget(t1)
+        vlay.addWidget(t2)
+        hlay.addLayout(vlay)
+        hlay.addStretch()
+
+        ver = QLabel(f"v{VERSION}")
+        ver.setStyleSheet("color:#333355; font-size:10px;")
+        hlay.addWidget(ver)
+        return frame
+
+    def _refresh_status(self):
+        dest    = self.dest_dir_ref[0] if self.dest_dir_ref else "—"
+        github  = "GitHub: ON" if self.cfg.get("github_fallback") else "GitHub: OFF"
+        ffm     = os.path.basename(self.ffmpeg_exe) if self.ffmpeg_exe else "FFmpeg: absent"
+        self._status_lbl.setText(f"  {dest}   |   {github}   |   {ffm}")
+
+    # ── Constructeurs de pages ─────────────────────────────────────────────────
+
+    def _build_page_init(self):
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._init_lbl  = QLabel("Initialisation...")
+        self._init_lbl.setObjectName("title")
+        self._init_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._init_bar  = QProgressBar()
+        self._init_bar.setRange(0, 0)
+        self._init_bar.setFixedWidth(320)
+        lay.addStretch()
+        lay.addWidget(self._init_lbl)
+        lay.addSpacing(16)
+        lay.addWidget(self._init_bar, 0, Qt.AlignmentFlag.AlignCenter)
+        lay.addStretch()
+        return page
+
+    def _build_page_main(self):
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header = QLabel("— MENU PRINCIPAL —")
+        header.setObjectName("title")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addStretch()
+        lay.addWidget(header)
+        lay.addSpacing(28)
+        for text, slot, obj in [
+            ("🔍   Rechercher un anime", self._go_search, ""),
+            ("⚙    Paramètres",          self._go_settings, ""),
+            ("✖   Quitter",              self.close, "danger"),
+        ]:
+            btn = QPushButton(text)
+            btn.setFixedSize(290, 50)
+            btn.setFont(QFont("Consolas", 11))
+            if obj:
+                btn.setObjectName(obj)
+            btn.clicked.connect(slot)
+            lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
+            lay.addSpacing(8)
+        lay.addStretch()
+        return page
+
+    def _build_page_search(self):
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 40, 48, 40)
+        lbl  = QLabel("RECHERCHER UN ANIME")
+        lbl.setObjectName("title")
+        lay.addWidget(lbl)
+        sub = QLabel("Base de données locale (dossier anime-sama/)  —  fallback scraping anime-sama")
+        sub.setObjectName("subtitle")
+        lay.addWidget(sub)
+        lay.addSpacing(18)
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Nom de l'anime…")
+        self._search_edit.setFixedHeight(38)
+        self._search_edit.returnPressed.connect(self._on_search_submit)
+        lay.addWidget(self._search_edit)
+        lay.addSpacing(14)
+        row = QHBoxLayout()
+        btn_back = QPushButton("← Retour")
+        btn_back.clicked.connect(lambda: self._go(self.PAGE_MAIN))
+        btn_go   = QPushButton("Rechercher →")
+        btn_go.clicked.connect(self._on_search_submit)
+        row.addWidget(btn_back)
+        row.addStretch()
+        row.addWidget(btn_go)
+        lay.addLayout(row)
+        lay.addStretch()
+        return page
+
+    def _build_page_list(self):
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 24, 48, 24)
+        self._list_title_lbl = QLabel("LISTE")
+        self._list_title_lbl.setObjectName("title")
+        lay.addWidget(self._list_title_lbl)
+        self._list_sub_lbl = QLabel("")
+        self._list_sub_lbl.setObjectName("subtitle")
+        lay.addWidget(self._list_sub_lbl)
+        lay.addSpacing(10)
+        self._list_w = QListWidget()
+        self._list_w.itemDoubleClicked.connect(lambda _: self._list_select())
+        lay.addWidget(self._list_w, 1)
+        lay.addSpacing(10)
+        row = QHBoxLayout()
+        self._list_back_btn   = QPushButton("← Retour")
+        self._list_back_btn.clicked.connect(self._list_back_action)
+        self._list_select_btn = QPushButton("Sélectionner →")
+        self._list_select_btn.clicked.connect(self._list_select)
+        row.addWidget(self._list_back_btn)
+        row.addStretch()
+        row.addWidget(self._list_select_btn)
+        lay.addLayout(row)
+        return page
+
+    def _build_page_ep_input(self):
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 40, 48, 40)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._ep_title_lbl = QLabel("NUMÉRO D'ÉPISODE")
+        self._ep_title_lbl.setObjectName("title")
+        lay.addWidget(self._ep_title_lbl)
+        self._ep_sub_lbl = QLabel("")
+        self._ep_sub_lbl.setObjectName("subtitle")
+        lay.addWidget(self._ep_sub_lbl)
+        lay.addSpacing(22)
+        self._ep_spin = QSpinBox()
+        self._ep_spin.setRange(1, 9999)
+        self._ep_spin.setFixedSize(130, 42)
+        self._ep_spin.setFont(QFont("Consolas", 14))
+        lay.addWidget(self._ep_spin, 0, Qt.AlignmentFlag.AlignCenter)
+        lay.addSpacing(22)
+        row = QHBoxLayout()
+        btn_cancel = QPushButton("Annuler")
+        btn_cancel.clicked.connect(self._ep_cancel)
+        btn_ok     = QPushButton("Confirmer →")
+        btn_ok.clicked.connect(self._ep_confirm)
+        row.addStretch()
+        row.addWidget(btn_cancel)
+        row.addSpacing(10)
+        row.addWidget(btn_ok)
+        row.addStretch()
+        lay.addLayout(row)
+        lay.addStretch()
+        return page
+
+    def _build_page_settings(self):  # pylint: disable=too-many-locals
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 28, 48, 28)
+        lbl  = QLabel("PARAMÈTRES")
+        lbl.setObjectName("title")
+        lay.addWidget(lbl)
+        lay.addSpacing(20)
+
+        # Dossier de téléchargement
+        row1 = QHBoxLayout()
+        l1   = QLabel("Dossier de téléchargement :")
+        l1.setObjectName("subtitle")
+        self._set_dir_lbl = QLabel(self.dest_dir_ref[0] if self.dest_dir_ref else "—")
+        self._set_dir_lbl.setStyleSheet("color:#00d4ff;")
+        btn1 = QPushButton("Choisir…")
+        btn1.setFixedWidth(90)
+        btn1.clicked.connect(self._settings_choose_dir)
+        row1.addWidget(l1)
+        row1.addSpacing(8)
+        row1.addWidget(self._set_dir_lbl, 1)
+        row1.addWidget(btn1)
+        lay.addLayout(row1)
+        lay.addSpacing(14)
+
+        # GitHub fallback
+        row2 = QHBoxLayout()
+        l2   = QLabel("GitHub fallback :")
+        l2.setObjectName("subtitle")
+        self._set_gh_btn = QPushButton()
+        self._set_gh_btn.setFixedWidth(120)
+        self._set_gh_btn.clicked.connect(self._settings_toggle_gh)
+        self._refresh_gh_btn()
+        row2.addWidget(l2)
+        row2.addSpacing(8)
+        row2.addWidget(self._set_gh_btn)
+        row2.addStretch()
+        lay.addLayout(row2)
+        if not GITHUB_TOKEN:
+            warn_lbl = QLabel("⚠  GITHUB_TOKEN absent du fichier .env")
+            warn_lbl.setStyleSheet("color:#ffaa00; font-size:10px;")
+            lay.addWidget(warn_lbl)
+        lay.addSpacing(14)
+
+        # FFmpeg
+        row3 = QHBoxLayout()
+        l3   = QLabel("FFmpeg :")
+        l3.setObjectName("subtitle")
+        ff_val = self.ffmpeg_exe or "Introuvable"
+        ff_lbl = QLabel(ff_val)
+        ff_lbl.setStyleSheet("color:#00d4ff;" if self.ffmpeg_exe else "color:#ff6b6b;")
+        row3.addWidget(l3)
+        row3.addSpacing(8)
+        row3.addWidget(ff_lbl, 1)
+        lay.addLayout(row3)
+
+        lay.addStretch()
+        btn_back = QPushButton("← Retour")
+        btn_back.setFixedWidth(120)
+        btn_back.clicked.connect(lambda: self._go(self.PAGE_MAIN))
+        lay.addWidget(btn_back)
+        return page
+
+    def _build_page_download(self):  # pylint: disable=too-many-statements
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 24, 48, 24)
+
+        self._dl_title_lbl = QLabel("TÉLÉCHARGEMENT EN COURS")
+        self._dl_title_lbl.setObjectName("title")
+        lay.addWidget(self._dl_title_lbl)
+        self._dl_anime_lbl = QLabel("")
+        self._dl_anime_lbl.setObjectName("subtitle")
+        lay.addWidget(self._dl_anime_lbl)
+        lay.addSpacing(14)
+
+        self._dl_ep_lbl = QLabel("Préparation…")
+        self._dl_ep_lbl.setStyleSheet("color:#00d4ff; font-size:12px;")
+        lay.addWidget(self._dl_ep_lbl)
+        lay.addSpacing(4)
+
+        lbl_o = QLabel("Progression globale :")
+        lbl_o.setObjectName("subtitle")
+        lay.addWidget(lbl_o)
+        self._dl_overall = QProgressBar()
+        self._dl_overall.setFixedHeight(14)
+        lay.addWidget(self._dl_overall)
+        lay.addSpacing(10)
+
+        lbl_e = QLabel("Progression de l'épisode :")
+        lbl_e.setObjectName("subtitle")
+        lay.addWidget(lbl_e)
+        self._dl_ep_bar = QProgressBar()
+        self._dl_ep_bar.setRange(0, 100)
+        self._dl_ep_bar.setFixedHeight(22)
+        lay.addWidget(self._dl_ep_bar)
+        lay.addSpacing(4)
+        self._dl_speed_lbl = QLabel("")
+        self._dl_speed_lbl.setObjectName("subtitle")
+        lay.addWidget(self._dl_speed_lbl)
+        lay.addSpacing(12)
+
+        lbl_log = QLabel("Journal :")
+        lbl_log.setObjectName("subtitle")
+        lay.addWidget(lbl_log)
+        self._dl_log = QTextEdit()
+        self._dl_log.setReadOnly(True)
+        self._dl_log.setFixedHeight(150)
+        lay.addWidget(self._dl_log)
+        lay.addSpacing(12)
+
+        row = QHBoxLayout()
+        self._dl_cancel_btn = QPushButton("✖  Annuler")
+        self._dl_cancel_btn.setObjectName("danger")
+        self._dl_cancel_btn.clicked.connect(self._dl_cancel)
+        self._dl_done_btn   = QPushButton("✔  Terminé  —  Retour menu")
+        self._dl_done_btn.setObjectName("success")
+        self._dl_done_btn.setEnabled(False)
+        self._dl_done_btn.clicked.connect(lambda: self._go(self.PAGE_MAIN))
+        row.addWidget(self._dl_cancel_btn)
+        row.addStretch()
+        row.addWidget(self._dl_done_btn)
+        lay.addLayout(row)
+        return page
+
+    # ── Navigation ─────────────────────────────────────────────────────────────
+
+    def _go(self, page_idx):
+        self._stack.setCurrentIndex(page_idx)
+
+    def _go_search(self):
+        self._search_edit.clear()
+        self._go(self.PAGE_SEARCH)
+        self._search_edit.setFocus()
+
+    def _go_settings(self):
+        self._set_dir_lbl.setText(self.dest_dir_ref[0] if self.dest_dir_ref else "—")
+        self._refresh_gh_btn()
+        self._go(self.PAGE_SETTINGS)
+
+    def _show_list(self, opts, title, subtitle, callback, back=None):
+        """Remplit et affiche la page liste générique."""
+        self._list_title_lbl.setText(title)
+        self._list_sub_lbl.setText(subtitle)
+        self._list_w.clear()
+        for o in opts:
+            self._list_w.addItem(o)
+        if self._list_w.count():
+            self._list_w.setCurrentRow(0)
+        self._list_cb   = callback
+        self._list_back = back if back is not None else self.PAGE_MAIN
+        self._go(self.PAGE_LIST)
+
+    def _list_select(self):
+        row = self._list_w.currentRow()
+        if row >= 0 and self._list_cb:
+            self._list_cb(row)
+
+    def _list_back_action(self):
+        self._go(self._list_back)
+
+    def _ask_ep(self, prompt, max_val, min_val, callback):
+        """Affiche la page saisie d'épisode et appelle callback(n) à la confirmation."""
+        self._ep_title_lbl.setText("NUMÉRO D'ÉPISODE")
+        self._ep_sub_lbl.setText(prompt)
+        self._ep_spin.setRange(min_val, max_val)
+        self._ep_spin.setValue(min_val)
+        self._ep_cb   = callback
+        self._ep_back = self._stack.currentIndex()
+        self._go(self.PAGE_EP_INPUT)
+
+    def _ep_confirm(self):
+        val = self._ep_spin.value()
+        if self._ep_cb:
+            self._ep_cb(val)
+
+    def _ep_cancel(self):
+        self._go(self._ep_back)
+
+    # ── Recherche ──────────────────────────────────────────────────────────────
+
+    def _on_search_submit(self):
+        query_raw = self._search_edit.text().strip()
+        if not query_raw:
+            return
+        query   = normalize_query(query_raw)
+        results = search_local(query)
+
+        if not results:
+            self._show_list(
+                [f"Chercher « {slug_to_display(query)} » sur anime-sama",
+                 "Modifier la recherche"],
+                "AUCUN RÉSULTAT LOCAL",
+                f"Aucun résultat pour « {query_raw} »",
+                lambda idx, q=query, qr=query_raw: self._no_results(idx, q, qr),
+                back=self.PAGE_SEARCH,
+            )
+            return
+        if len(results) == 1:
+            self._load_anime(results[0])
+            return
+        self._show_list(
+            [slug_to_display(s) for s in results],
+            "RÉSULTATS",
+            f"{len(results)} résultat(s) pour « {query_raw} »",
+            lambda idx, r=results: self._load_anime(r[idx]),
+            back=self.PAGE_SEARCH,
+        )
+
+    def _no_results(self, idx, query, _query_raw):
+        if idx == 0:
+            self._load_anime(query)
+        else:
+            self._go(self.PAGE_SEARCH)
+
+    def _load_anime(self, slug):
+        self._slug       = slug
+        self._anime_name = slug_to_display(slug)
+        self._list_title_lbl.setText("CHARGEMENT…")
+        self._list_sub_lbl.setText(f"Récupération des données pour {self._anime_name}")
+        self._list_w.clear()
+        self._go(self.PAGE_LIST)
+        t = LoadAnimeThread(slug, self.cfg, self)
+        t.finished.connect(self._on_anime_loaded)
+        t.start()
+
+    def _on_anime_loaded(self, data):
+        if data is None:
+            self._msg("Anime introuvable",
+                      f"Impossible de trouver « {self._anime_name} ».\n"
+                      "Vérifiez le nom ou sa disponibilité sur anime-sama.")
+            self._go(self.PAGE_SEARCH)
+            return
+        if not data:
+            self._msg("Aucune vidéo",
+                      f"« {self._anime_name} » existe mais aucune vidéo n'est disponible.")
+            self._go(self.PAGE_SEARCH)
+            return
+        self._anime_data = data
+        langs = [l for l in ALL_LANGUAGES if l in data]
+        if not langs:
+            self._msg("Aucune langue", "Aucune langue disponible pour cet anime.")
+            self._go(self.PAGE_SEARCH)
+            return
+        self._show_list(
+            [LANG_LABELS.get(l, l.upper()) for l in langs],
+            "CHOISIR UNE LANGUE",
+            self._anime_name,
+            lambda idx, ls=langs: self._on_lang(ls[idx]),
+            back=self.PAGE_SEARCH,
+        )
+
+    def _on_lang(self, lang):
+        self._lang   = lang
+        lang_data    = self._anime_data.get(lang, {})
+        saisons      = list(lang_data.keys())
+        if not saisons:
+            self._msg("Aucune saison", f"Aucune saison disponible en {lang.upper()}.")
+            return
+        if len(saisons) == 1:
+            self._on_saison(saisons[0])
+            return
+        opts = []
+        for k in saisons:
+            d, _, _, _ = saison_key_info(k)
+            n = count_episodes(lang_data[k])
+            opts.append(f"{d}  ({n} épisode(s))")
+        self._show_list(
+            opts,
+            "CHOISIR UNE SAISON",
+            f"{self._anime_name}  —  {lang.upper()}",
+            lambda idx, ss=saisons: self._on_saison(ss[idx]),
+            back=self.PAGE_LIST,
+        )
+
+    def _on_saison(self, saison_key):
+        self._saison_key = saison_key
+        lang_data  = self._anime_data.get(self._lang, {})
+        total_all  = sum(count_episodes(lang_data[k]) for k in lang_data)
+        nb_saisons = len(lang_data)
+        n          = count_episodes(lang_data.get(saison_key, []))
+        disp, _, _, _ = saison_key_info(saison_key)
+        self._show_list(
+            [
+                f"Toute la série  ({total_all} ep. — {nb_saisons} saison(s))",
+                f"Toute la saison  ({n} épisode(s))",
+                "Un épisode spécifique",
+                "D'un épisode X à Y",
+                "Depuis un épisode",
+            ],
+            "QUE TÉLÉCHARGER ?",
+            f"{self._anime_name}  —  {self._lang.upper()}  —  {disp}",
+            lambda idx, n_=n, ld=lang_data: self._on_what(idx, n_, ld),
+            back=self.PAGE_LIST,
+        )
+
+    def _on_what(self, choice, n, lang_data):  # pylint: disable=too-many-branches
+        slug  = self._slug
+        data  = self._anime_data
+        lang  = self._lang
+        skey  = self._saison_key
+
+        if choice == 0:
+            self._start_series(slug, data, lang, list(lang_data.keys()), lang_data)
+        elif choice == 1:
+            self._start_dl(slug, data, lang, skey, (0, n - 1))
+        elif choice == 2:
+            self._ask_ep(f"Épisode à télécharger (1-{n})", n, 1,
+                         lambda ep: self._start_dl(slug, data, lang, skey, (ep - 1, ep - 1)))
+        elif choice == 3:
+            def _ask_y(x):
+                self._ask_ep(f"Épisode de fin ({x}-{n})", n, x,
+                             lambda y, x_=x: self._start_dl(slug, data, lang, skey, (x_ - 1, y - 1)))
+            self._ask_ep(f"Épisode de départ (1-{n})", n, 1, _ask_y)
+        elif choice == 4:
+            self._ask_ep(f"Depuis l'épisode (1-{n})", n, 1,
+                         lambda ep: self._start_dl(slug, data, lang, skey, (ep - 1, n - 1)))
+
+    # ── Téléchargement ─────────────────────────────────────────────────────────
+
+    def _start_dl(self, slug, anime_data, lang, saison_key, ep_range):
+        """Lance un téléchargement sur une saison / plage d'épisodes."""
+        disp, _, _, _ = saison_key_info(saison_key)
+        total = ep_range[1] - ep_range[0] + 1
+        self._dl_title_lbl.setText("TÉLÉCHARGEMENT EN COURS")
+        self._dl_anime_lbl.setText(f"{self._anime_name}  —  {lang.upper()}  —  {disp}")
+        self._dl_ep_lbl.setText("Préparation…")
+        self._dl_overall.setRange(0, total)
+        self._dl_overall.setValue(0)
+        self._dl_ep_bar.setValue(0)
+        self._dl_speed_lbl.setText("")
+        self._dl_log.clear()
+        self._dl_cancel_btn.setEnabled(True)
+        self._dl_done_btn.setEnabled(False)
+        self._go(self.PAGE_DOWNLOAD)
+
+        self._dl_thread = DownloadThread(
+            slug, anime_data, lang, saison_key, ep_range,
+            self.dest_dir_ref[0], self._anime_name, self.ffmpeg_exe, self,
+        )
+        self._dl_thread.ep_start.connect(self._dl_ep_start)
+        self._dl_thread.ep_progress.connect(self._dl_ep_prog)
+        self._dl_thread.ep_done.connect(self._dl_ep_done)
+        self._dl_thread.all_done.connect(self._dl_all_done)
+        self._dl_thread.start()
+
+    def _start_series(self, slug, anime_data, lang, saisons, lang_data):
+        """Télécharge toute la série saison par saison."""
+        self._dl_queue     = list(saisons)
+        self._dl_queue_ctx = (slug, anime_data, lang, lang_data)
+        self._dl_queue_res = (0, 0)
+        self._next_in_queue()
+
+    def _next_in_queue(self):
+        slug, anime_data, lang, lang_data = self._dl_queue_ctx
+        while self._dl_queue:
+            skey = self._dl_queue.pop(0)
+            n    = count_episodes(lang_data.get(skey, []))
+            if n:
+                disp, _, _, _ = saison_key_info(skey)
+                self._dl_anime_lbl.setText(
+                    f"{self._anime_name}  —  {lang.upper()}  —  {disp}"
+                )
+                self._dl_ep_bar.setValue(0)
+                self._dl_overall.setRange(0, n)
+                self._dl_overall.setValue(0)
+                self._dl_cancel_btn.setEnabled(True)
+                self._dl_done_btn.setEnabled(False)
+                self._go(self.PAGE_DOWNLOAD)
+
+                self._dl_thread = DownloadThread(
+                    slug, anime_data, lang, skey, (0, n - 1),
+                    self.dest_dir_ref[0], self._anime_name, self.ffmpeg_exe, self,
+                )
+                self._dl_thread.ep_start.connect(self._dl_ep_start)
+                self._dl_thread.ep_progress.connect(self._dl_ep_prog)
+                self._dl_thread.ep_done.connect(self._dl_ep_done)
+                self._dl_thread.all_done.connect(self._dl_queue_season_done)
+                self._dl_thread.start()
+                return
+        # File vide → fin de série
+        ok, fail = self._dl_queue_res
+        self._dl_log.append(f"\n✔  Série complète terminée !  {ok} succès  /  {fail} échec(s)")
+        self._dl_cancel_btn.setEnabled(False)
+        self._dl_done_btn.setEnabled(True)
+
+    def _dl_queue_season_done(self, ok, fail):
+        prev_ok, prev_fail = self._dl_queue_res
+        self._dl_queue_res = (prev_ok + ok, prev_fail + fail)
+        self._next_in_queue()
+
+    def _dl_ep_start(self, current, total, name):
+        self._dl_ep_lbl.setText(f"Épisode {current} / {total}  —  {name}")
+        self._dl_overall.setValue(current - 1)
+        self._dl_ep_bar.setValue(0)
+        self._dl_log.append(f"[{current}/{total}]  {name}")
+
+    def _dl_ep_prog(self, pct, speed, eta):
+        self._dl_ep_bar.setValue(int(pct))
+        parts = [p for p in (speed, f"ETA {eta}" if eta else "") if p]
+        self._dl_speed_lbl.setText("   ".join(parts))
+
+    def _dl_ep_done(self, ok, name):
+        self._dl_overall.setValue(self._dl_overall.value() + 1)
+        if ok:
+            self._dl_log.append(f"  ✔  {name}.mp4")
+        else:
+            self._dl_log.append(f"  ✖  {name}  — ÉCHEC")
+
+    def _dl_all_done(self, ok, fail):
+        self._dl_ep_bar.setValue(100)
+        self._dl_overall.setValue(self._dl_overall.maximum())
+        self._dl_ep_lbl.setText(f"Terminé !   {ok} succès  /  {fail} échec(s)")
+        self._dl_speed_lbl.setText("")
+        self._dl_log.append(f"\n✔  Terminé !  {ok} succès  /  {fail} échec(s)")
+        self._dl_cancel_btn.setEnabled(False)
+        self._dl_done_btn.setEnabled(True)
+
+    def _dl_cancel(self):
+        if self._dl_thread and self._dl_thread.isRunning():
+            self._dl_thread.cancel()
+            self._dl_log.append("  ⚠  Annulation demandée…")
+            self._dl_cancel_btn.setEnabled(False)
+
+    # ── Paramètres ─────────────────────────────────────────────────────────────
+
+    def _refresh_gh_btn(self):
+        on = self.cfg.get("github_fallback", False)
+        self._set_gh_btn.setText("✔  Activé" if on else "✖  Désactivé")
+        self._set_gh_btn.setStyleSheet(
+            "color:#00ff99; border-color:#00ff9944;" if on else ""
+        )
+
+    def _settings_choose_dir(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Choisir le dossier de téléchargement", self.dest_dir_ref[0]
+        )
+        if path:
+            self.dest_dir_ref[0] = path
+            _save_config({"dest_dir": path})
+            self._set_dir_lbl.setText(path)
+            self._refresh_status()
+
+    def _settings_toggle_gh(self):
+        on = not self.cfg.get("github_fallback", False)
+        self.cfg["github_fallback"] = on
+        _save_config({"github_fallback": on})
+        self._refresh_gh_btn()
+        self._refresh_status()
+
+    # ── Utilitaires ────────────────────────────────────────────────────────────
+
+    def _msg(self, title, text):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle(title)
+        dlg.setText(text)
+        dlg.setStyleSheet(_QSS)
+        dlg.exec()
+
+    def closeEvent(self, event):  # pylint: disable=invalid-name
+        """Arrête proprement le thread de téléchargement à la fermeture."""
+        if self._dl_thread and self._dl_thread.isRunning():
+            self._dl_thread.cancel()
+            self._dl_thread.wait(3000)
+        event.accept()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Point d'entrée GUI
+# ══════════════════════════════════════════════════════════════════════════════
+
+def main_gui():
+    """Lance l'interface PyQt6 (PC uniquement)."""
+    # Désactive le clear terminal pour ne pas polluer l'éventuelle console
+    ConsoleUI.clear = staticmethod(lambda: None)
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("Ney-Chan")
+    app.setApplicationVersion(VERSION)
+    app.setStyleSheet(_QSS)
+
+    cfg      = _load_config()
+    dest_ref = [cfg.get("dest_dir", "")]
+
+    # ── Écran de démarrage ───────────────────────────────────────────────────
+    splash = QWidget()
+    splash.setWindowTitle("Ney-Chan — Initialisation")
+    splash.setFixedSize(420, 200)
+    splash.setStyleSheet(_QSS)
+    slay = QVBoxLayout(splash)
+    slay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    sl1 = QLabel("🎌  NEY-CHAN")
+    sl1.setStyleSheet("color:#00d4ff; font-size:26px; font-weight:bold;")
+    sl1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    sl2 = QLabel("Initialisation…")
+    sl2.setStyleSheet("color:#666680; font-size:11px;")
+    sl2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    spb = QProgressBar()
+    spb.setRange(0, 0)
+    spb.setFixedWidth(300)
+    slay.addStretch()
+    slay.addWidget(sl1)
+    slay.addSpacing(8)
+    slay.addWidget(sl2)
+    slay.addSpacing(14)
+    slay.addWidget(spb, 0, Qt.AlignmentFlag.AlignCenter)
+    slay.addStretch()
+    splash.show()
+
+    win_holder = [None]   # garde une référence à la fenêtre principale
+
+    def _on_init_progress(msg):
+        sl2.setText(msg)
+
+    def _on_init_done(ffmpeg_exe):
+        splash.hide()
+        splash.deleteLater()
+
+        # Résolution du dossier de destination
+        saved = cfg.get("dest_dir", "")
+        if not saved or not os.path.isdir(saved):
+            if IS_WINDOWS:
+                la       = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+                fallback = os.path.join(la, "Koyney", "Ney-Chan", "Downloads")
+            else:
+                fallback = os.path.join(os.path.expanduser("~"), "Animes")
+            try:
+                os.makedirs(fallback, exist_ok=True)
+                dest_ref[0] = fallback
+            except Exception:  # pylint: disable=broad-except
+                dest_ref[0] = os.path.abspath(_BASE_DIR)
+            _save_config({"dest_dir": dest_ref[0]})
+        else:
+            dest_ref[0] = saved
+
+        win = NeyChanWindow(cfg, dest_ref, ffmpeg_exe or None)
+        win._go(NeyChanWindow.PAGE_MAIN)  # pylint: disable=protected-access
+        win.show()
+        win_holder[0] = win
+
+    init_t = InitThread()
+    init_t.progress.connect(_on_init_progress)
+    init_t.finished.connect(_on_init_done)
+    init_t.start()
+
+    sys.exit(app.exec())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -662,6 +1682,10 @@ def _download_url(url, out_path, ffmpeg_exe=None):
     bar_w = 28
 
     def _progress_hook(d):
+        # En mode Qt, déléguer au callback graphique
+        if _qt_progress_callback is not None:
+            _qt_progress_callback(d)
+            return
         if d["status"] == "downloading":
             pct_str = d.get("_percent_str", "  ?%").strip()
             speed   = d.get("_speed_str",   "").strip()
@@ -1156,6 +2180,11 @@ def init_dest_dir(cfg):
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     ConsoleUI.enable_ansi()
+    # ── Mode GUI (PC) ──────────────────────────────────────────────────────────
+    if IS_PC and PYQT_AVAILABLE:
+        main_gui()
+        return
+    # ── Mode console (Termux / PC sans PyQt6) ─────────────────────────────────
     if IS_WINDOWS:
         os.system("title Ney-Chan -- Anime Downloader")
 
