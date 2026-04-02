@@ -89,13 +89,16 @@ LANG_LABELS = {
 #  ConsoleUI
 # ══════════════════════════════════════════════════════════════════════════════
 class ConsoleUI:
-    RESET  = "\033[0m"
-    BOLD   = "\033[1m"
-    DIM    = "\033[2m"
-    RED    = "\033[31m"
-    GREEN  = "\033[32m"
-    YELLOW = "\033[33m"
-    CYAN   = "\033[36m"
+    RESET   = "\033[0m"
+    BOLD    = "\033[1m"
+    DIM     = "\033[2m"
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    CYAN    = "\033[36m"
+    MAGENTA = "\033[35m"
+    WHITE   = "\033[97m"
+    BG_HDR  = "\033[48;5;17m"   # fond bleu nuit pour en-têtes
 
     BANNER = "\033[36m" + r"""
 ╔═════════════════════════════════════════════════════════════════════════╗
@@ -110,6 +113,13 @@ class ConsoleUI:
 ║              🎌  NEY-CHAN  ANIME DOWNLOADER  v1.0  🎌                   ║
 ║                                                                         ║
 ╚═════════════════════════════════════════════════════════════════════════╝""" + "\033[0m"
+
+    # Bannière légère pour Termux (sans ASCII art)
+    TERMUX_BANNER = (
+        "\033[36m\n  " + "─" * 54 + "\033[0m\n"
+        "  \033[1m\033[36m  🎌  NEY-CHAN  ·  ANIME DOWNLOADER  🎌\033[0m\n"
+        "\033[36m  " + "─" * 54 + "\033[0m"
+    )
 
     MAX_VISIBLE = 8
 
@@ -197,15 +207,15 @@ class ConsoleUI:
     @staticmethod
     def show_menu_termux(options, title="MENU", subtitle=""):
         ConsoleUI.clear()
-        print(f"{ConsoleUI.CYAN}\n  {'='*54}{ConsoleUI.RESET}")
-        print(f"  {ConsoleUI.BOLD}{ConsoleUI.CYAN}  Ney-Chan  --  {title}{ConsoleUI.RESET}")
+        print(ConsoleUI.TERMUX_BANNER)
+        print(f"\n  {ConsoleUI.BOLD}{ConsoleUI.CYAN}  {title}{ConsoleUI.RESET}")
         if subtitle:
             print(f"  {ConsoleUI.DIM}{subtitle}{ConsoleUI.RESET}")
-        print(f"{ConsoleUI.CYAN}  {'='*54}{ConsoleUI.RESET}\n")
+        print(f"{ConsoleUI.CYAN}  {'─'*54}{ConsoleUI.RESET}\n")
         for i, opt in enumerate(options, 1):
             print(f"  {ConsoleUI.CYAN}{ConsoleUI.BOLD}[{i}]{ConsoleUI.RESET}  {opt}")
         print(f"  {ConsoleUI.CYAN}{ConsoleUI.BOLD}[0]{ConsoleUI.RESET}  {ConsoleUI.DIM}Retour{ConsoleUI.RESET}")
-        print(f"\n{ConsoleUI.CYAN}  {'-'*54}{ConsoleUI.RESET}")
+        print(f"\n{ConsoleUI.CYAN}  {'─'*54}{ConsoleUI.RESET}")
 
     @staticmethod
     def get_key():
@@ -275,14 +285,15 @@ class ConsoleUI:
     @staticmethod
     def input_screen(title, prompt_text, subtitle="", allow_esc=False):
         ConsoleUI.clear()
-        print(ConsoleUI.BANNER)
-        print(f"\n  {ConsoleUI.CYAN}{ConsoleUI.BOLD}{'-'*58}{ConsoleUI.RESET}")
-        print(f"  {ConsoleUI.BOLD}{title}{ConsoleUI.RESET}")
+        banner = ConsoleUI.TERMUX_BANNER if IS_TERMUX else ConsoleUI.BANNER
+        print(banner)
+        print(f"\n  {ConsoleUI.CYAN}{ConsoleUI.BOLD}{'─'*58}{ConsoleUI.RESET}")
+        print(f"  {ConsoleUI.BOLD}{ConsoleUI.WHITE}{title}{ConsoleUI.RESET}")
         if subtitle:
             print(f"  {ConsoleUI.DIM}{subtitle}{ConsoleUI.RESET}")
         if allow_esc:
             print(f"  {ConsoleUI.DIM}(Laissez vide + Entree pour annuler){ConsoleUI.RESET}")
-        print(f"  {ConsoleUI.CYAN}{'-'*58}{ConsoleUI.RESET}\n")
+        print(f"  {ConsoleUI.CYAN}{'─'*58}{ConsoleUI.RESET}\n")
         try:
             val = input(f"  {ConsoleUI.YELLOW}>  {ConsoleUI.RESET}{prompt_text} : ").strip()
             if allow_esc and not val:
@@ -294,11 +305,12 @@ class ConsoleUI:
     @staticmethod
     def result_screen(lines, pause=True):
         ConsoleUI.clear()
-        print(ConsoleUI.BANNER)
-        print(ConsoleUI.CYAN + "\n  " + "=" * 58 + ConsoleUI.RESET)
+        banner = ConsoleUI.TERMUX_BANNER if IS_TERMUX else ConsoleUI.BANNER
+        print(banner)
+        print(ConsoleUI.CYAN + "\n  " + "─" * 58 + ConsoleUI.RESET)
         for line in lines:
             print(line)
-        print(ConsoleUI.CYAN + "\n  " + "=" * 58 + ConsoleUI.RESET)
+        print(ConsoleUI.CYAN + "\n  " + "─" * 58 + ConsoleUI.RESET)
         if pause:
             try:
                 input(f"\n  {ConsoleUI.DIM}Appuyez sur Entree pour continuer...{ConsoleUI.RESET}")
@@ -306,15 +318,15 @@ class ConsoleUI:
                 pass
 
     @staticmethod
-    def info(m):    print(f"  {ConsoleUI.CYAN}i  {ConsoleUI.RESET}{m}")
+    def info(m):    print(f"  {ConsoleUI.CYAN}ℹ  {ConsoleUI.RESET}{m}")
     @staticmethod
-    def success(m): print(f"  {ConsoleUI.GREEN}OK {ConsoleUI.RESET}{m}")
+    def success(m): print(f"  {ConsoleUI.GREEN}✔  {ConsoleUI.RESET}{m}")
     @staticmethod
-    def warn(m):    print(f"  {ConsoleUI.YELLOW}!  {ConsoleUI.RESET}{m}")
+    def warn(m):    print(f"  {ConsoleUI.YELLOW}⚠  {ConsoleUI.RESET}{m}")
     @staticmethod
-    def err(m):     print(f"  {ConsoleUI.RED}X  {ConsoleUI.RESET}{m}")
+    def err(m):     print(f"  {ConsoleUI.RED}✖  {ConsoleUI.RESET}{m}")
     @staticmethod
-    def sep():      print(f"\n  {ConsoleUI.DIM}{'-'*54}{ConsoleUI.RESET}\n")
+    def sep():      print(f"\n  {ConsoleUI.CYAN}{'─'*54}{ConsoleUI.RESET}\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -363,51 +375,71 @@ QLabel#title {
     color: #00d4ff;
     font-size: 14px;
     font-weight: bold;
+    letter-spacing: 1px;
 }
-QLabel#subtitle { color: #666680; font-size: 11px; }
+QLabel#subtitle { color: #7788aa; font-size: 11px; }
+QLabel#section {
+    color: #cc88ff;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
 QPushButton {
     background-color: #12122a;
     color: #00d4ff;
-    border: 1px solid #00d4ff44;
-    border-radius: 5px;
+    border: 1px solid #00d4ff55;
+    border-radius: 6px;
     padding: 7px 16px;
     font-family: Consolas, "Courier New", monospace;
 }
-QPushButton:hover  { background-color: #00d4ff; color: #0d0d1a; }
-QPushButton:disabled { color: #333344; border-color: #333344; }
-QPushButton#danger { color: #ff6b6b; border-color: #ff6b6b44; }
+QPushButton:hover  {
+    background-color: #00d4ff;
+    color: #0d0d1a;
+    border-color: #00d4ff;
+}
+QPushButton:disabled { color: #2a2a4a; border-color: #1e1e3a; background-color: #0f0f1e; }
+QPushButton#danger { color: #ff6b6b; border-color: #ff6b6b55; }
 QPushButton#danger:hover  { background-color: #ff6b6b; color: #0d0d1a; }
-QPushButton#success { color: #00ff99; border-color: #00ff9944; }
+QPushButton#success { color: #00ff99; border-color: #00ff9955; }
+QPushButton#success:hover { background-color: #00ff99; color: #0d0d1a; }
+QPushButton#accent {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #1a0a30, stop:1 #0a1a30);
+    color: #cc88ff;
+    border-color: #cc88ff55;
+}
+QPushButton#accent:hover { background-color: #cc88ff; color: #0d0d1a; }
 QListWidget {
     background-color: #0f0f22;
     border: 1px solid #1e1e3a;
-    border-radius: 5px;
+    border-radius: 6px;
     color: #e0e8ff;
     font-family: Consolas, "Courier New", monospace;
     font-size: 12px;
     outline: none;
 }
-QListWidget::item { padding: 7px 10px; border-bottom: 1px solid #1a1a30; }
+QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #1a1a30; }
 QListWidget::item:selected {
-    background-color: #00d4ff18;
+    background-color: #00d4ff1a;
     color: #00d4ff;
     border-left: 3px solid #00d4ff;
 }
-QListWidget::item:hover { background-color: #181830; }
+QListWidget::item:hover { background-color: #181832; }
 QLineEdit {
     background-color: #0f0f22;
     border: 1px solid #1e1e3a;
-    border-radius: 5px;
+    border-radius: 6px;
     color: #e0e8ff;
     padding: 6px 10px;
     font-family: Consolas, "Courier New", monospace;
     font-size: 12px;
 }
-QLineEdit:focus { border-color: #00d4ff; }
+QLineEdit:focus { border-color: #00d4ff; background-color: #11112a; }
 QSpinBox {
     background-color: #0f0f22;
     border: 1px solid #1e1e3a;
-    border-radius: 5px;
+    border-radius: 6px;
     color: #e0e8ff;
     padding: 4px 8px;
     font-size: 14px;
@@ -422,12 +454,16 @@ QProgressBar {
     color: #e0e8ff;
     font-size: 10px;
 }
-QProgressBar::chunk { background-color: #00d4ff; border-radius: 4px; }
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #0099bb, stop:1 #00d4ff);
+    border-radius: 4px;
+}
 QTextEdit {
     background-color: #080814;
     border: 1px solid #1e1e3a;
-    border-radius: 5px;
-    color: #666680;
+    border-radius: 6px;
+    color: #7788aa;
     font-family: Consolas, "Courier New", monospace;
     font-size: 10px;
 }
@@ -435,6 +471,7 @@ QScrollBar:vertical { background: #0f0f22; width: 8px; border-radius: 4px; }
 QScrollBar::handle:vertical { background: #2a2a4a; border-radius: 4px; min-height: 20px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QMessageBox { background-color: #12122a; }
+QFrame#divider { background-color: #1e1e3a; max-height: 1px; }
 """
 
 
@@ -625,33 +662,34 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 
     def _make_header(self):
         frame = QWidget()
-        frame.setFixedHeight(68)
+        frame.setFixedHeight(72)
         frame.setStyleSheet(
-            "background-color:#080814; border-bottom:1px solid #00d4ff22;"
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #080814, stop:0.5 #0d0d22, stop:1 #080814);"
+            "border-bottom: 1px solid #00d4ff33;"
         )
         hlay = QHBoxLayout(frame)
-        hlay.setContentsMargins(18, 8, 18, 8)
+        hlay.setContentsMargins(20, 8, 20, 8)
 
         vlay = QVBoxLayout()
         t1 = QLabel("🎌  NEY-CHAN")
-        t1.setStyleSheet("color:#00d4ff; font-size:20px; font-weight:bold;")
+        t1.setStyleSheet("color:#00d4ff; font-size:22px; font-weight:bold; letter-spacing:2px;")
         t2 = QLabel("A N I M E   D O W N L O A D E R")
-        t2.setStyleSheet("color:#333355; font-size:9px; letter-spacing:3px;")
+        t2.setStyleSheet("color:#cc88ff; font-size:9px; letter-spacing:4px;")
         vlay.addWidget(t1)
         vlay.addWidget(t2)
         hlay.addLayout(vlay)
         hlay.addStretch()
 
         ver = QLabel(f"v{VERSION}")
-        ver.setStyleSheet("color:#333355; font-size:10px;")
+        ver.setStyleSheet("color:#2a3a5a; font-size:10px;")
         hlay.addWidget(ver)
         return frame
 
     def _refresh_status(self):
-        dest    = self.dest_dir_ref[0] if self.dest_dir_ref else "—"
-        github  = "GitHub: ON" if self.cfg.get("github_fallback") else "GitHub: OFF"
-        ffm     = os.path.basename(self.ffmpeg_exe) if self.ffmpeg_exe else "FFmpeg: absent"
-        self._status_lbl.setText(f"  {dest}   |   {github}   |   {ffm}")
+        dest   = self.dest_dir_ref[0] if self.dest_dir_ref else "—"
+        github = "GitHub: ON" if self.cfg.get("github_fallback") else "GitHub: OFF"
+        self._status_lbl.setText(f"  {dest}   |   {github}")
 
     # ── Constructeurs de pages ─────────────────────────────────────────────────
 
@@ -789,59 +827,73 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         page = QWidget()
         lay  = QVBoxLayout(page)
         lay.setContentsMargins(48, 28, 48, 28)
-        lbl  = QLabel("PARAMÈTRES")
+
+        lbl = QLabel("PARAMÈTRES")
         lbl.setObjectName("title")
         lay.addWidget(lbl)
+        lay.addSpacing(6)
+
+        # ── Dossier de téléchargement ─────────────────────────────────────────
+        lbl_dir = QLabel("DOSSIER DE TÉLÉCHARGEMENT")
+        lbl_dir.setObjectName("section")
+        lay.addWidget(lbl_dir)
+        lay.addSpacing(6)
+
+        row_dir = QHBoxLayout()
+        self._set_dir_edit = QLineEdit(self.dest_dir_ref[0] if self.dest_dir_ref else "")
+        self._set_dir_edit.setPlaceholderText("Chemin du dossier de téléchargement…")
+        self._set_dir_edit.setFixedHeight(34)
+        self._set_dir_edit.setMaximumWidth(420)
+        self._set_dir_edit.returnPressed.connect(self._settings_apply_dir)
+
+        btn_choose = QPushButton("📂 Choisir")
+        btn_choose.setFixedWidth(110)
+        btn_choose.clicked.connect(self._settings_choose_dir)
+
+        btn_apply = QPushButton("✔ Appliquer")
+        btn_apply.setFixedWidth(105)
+        btn_apply.setObjectName("success")
+        btn_apply.clicked.connect(self._settings_apply_dir)
+
+        row_dir.addWidget(self._set_dir_edit, 1)
+        row_dir.addSpacing(6)
+        row_dir.addWidget(btn_choose)
+        row_dir.addSpacing(4)
+        row_dir.addWidget(btn_apply)
+        lay.addLayout(row_dir)
         lay.addSpacing(20)
 
-        # Dossier de téléchargement
-        row1 = QHBoxLayout()
-        l1   = QLabel("Dossier de téléchargement :")
-        l1.setObjectName("subtitle")
-        self._set_dir_lbl = QLabel(self.dest_dir_ref[0] if self.dest_dir_ref else "—")
-        self._set_dir_lbl.setStyleSheet("color:#00d4ff;")
-        btn1 = QPushButton("Choisir…")
-        btn1.setFixedWidth(90)
-        btn1.clicked.connect(self._settings_choose_dir)
-        row1.addWidget(l1)
-        row1.addSpacing(8)
-        row1.addWidget(self._set_dir_lbl, 1)
-        row1.addWidget(btn1)
-        lay.addLayout(row1)
-        lay.addSpacing(14)
+        # ── GitHub fallback ───────────────────────────────────────────────────
+        lbl_gh = QLabel("GITHUB FALLBACK")
+        lbl_gh.setObjectName("section")
+        lay.addWidget(lbl_gh)
+        lay.addSpacing(6)
 
-        # GitHub fallback
-        row2 = QHBoxLayout()
-        l2   = QLabel("GitHub fallback :")
-        l2.setObjectName("subtitle")
+        row_gh = QHBoxLayout()
         self._set_gh_btn = QPushButton()
-        self._set_gh_btn.setFixedWidth(120)
+        self._set_gh_btn.setFixedWidth(130)
         self._set_gh_btn.clicked.connect(self._settings_toggle_gh)
-        self._refresh_gh_btn()
-        row2.addWidget(l2)
-        row2.addSpacing(8)
-        row2.addWidget(self._set_gh_btn)
-        row2.addStretch()
-        lay.addLayout(row2)
-        if not GITHUB_TOKEN:
-            warn_lbl = QLabel("⚠  GITHUB_TOKEN absent du fichier .env")
-            warn_lbl.setStyleSheet("color:#ffaa00; font-size:10px;")
-            lay.addWidget(warn_lbl)
-        lay.addSpacing(14)
 
-        # FFmpeg
-        row3 = QHBoxLayout()
-        l3   = QLabel("FFmpeg :")
-        l3.setObjectName("subtitle")
-        ff_val = self.ffmpeg_exe or "Introuvable"
-        ff_lbl = QLabel(ff_val)
-        ff_lbl.setStyleSheet("color:#00d4ff;" if self.ffmpeg_exe else "color:#ff6b6b;")
-        row3.addWidget(l3)
-        row3.addSpacing(8)
-        row3.addWidget(ff_lbl, 1)
-        lay.addLayout(row3)
+        # Si pas de token : forcer désactivé et bloquer le bouton
+        if not GITHUB_TOKEN:
+            self.cfg["github_fallback"] = False
+            _save_config({"github_fallback": False})
+
+        self._refresh_gh_btn()
+        row_gh.addWidget(self._set_gh_btn)
+        row_gh.addStretch()
+        lay.addLayout(row_gh)
+
+        if not GITHUB_TOKEN:
+            warn_lbl = QLabel("⚠  GITHUB_TOKEN absent du fichier .env — fallback GitHub désactivé")
+            warn_lbl.setStyleSheet("color:#ffaa44; font-size:10px; padding-top:4px;")
+            lay.addWidget(warn_lbl)
+            env_hint = QLabel("   Ajoutez  GITHUB_TOKEN=<votre_token>  dans un fichier .env")
+            env_hint.setStyleSheet("color:#556677; font-size:10px;")
+            lay.addWidget(env_hint)
 
         lay.addStretch()
+
         btn_back = QPushButton("← Retour")
         btn_back.setFixedWidth(120)
         btn_back.clicked.connect(lambda: self._go(self.PAGE_MAIN))
@@ -921,7 +973,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._search_edit.setFocus()
 
     def _go_settings(self):
-        self._set_dir_lbl.setText(self.dest_dir_ref[0] if self.dest_dir_ref else "—")
+        self._set_dir_edit.setText(self.dest_dir_ref[0] if self.dest_dir_ref else "")
         self._refresh_gh_btn()
         self._go(self.PAGE_SETTINGS)
 
@@ -973,15 +1025,9 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         query   = normalize_query(query_raw)
         results = search_local(query)
 
+        # Si pas de résultat local : on tente directement (GitHub + scraping auto)
         if not results:
-            self._show_list(
-                [f"Chercher « {slug_to_display(query)} » sur anime-sama",
-                 "Modifier la recherche"],
-                "AUCUN RÉSULTAT LOCAL",
-                f"Aucun résultat pour « {query_raw} »",
-                lambda idx, q=query, qr=query_raw: self._no_results(idx, q, qr),
-                back=self.PAGE_SEARCH,
-            )
+            self._load_anime(query)
             return
         if len(results) == 1:
             self._load_anime(results[0])
@@ -993,12 +1039,6 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
             lambda idx, r=results: self._load_anime(r[idx]),
             back=self.PAGE_SEARCH,
         )
-
-    def _no_results(self, idx, query, _query_raw):
-        if idx == 0:
-            self._load_anime(query)
-        else:
-            self._go(self.PAGE_SEARCH)
 
     def _load_anime(self, slug):
         self._slug       = slug
@@ -1212,21 +1252,39 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
     # ── Paramètres ─────────────────────────────────────────────────────────────
 
     def _refresh_gh_btn(self):
+        if not GITHUB_TOKEN:
+            self._set_gh_btn.setText("✖  Désactivé")
+            self._set_gh_btn.setEnabled(False)
+            self._set_gh_btn.setStyleSheet("")
+            return
         on = self.cfg.get("github_fallback", False)
         self._set_gh_btn.setText("✔  Activé" if on else "✖  Désactivé")
+        self._set_gh_btn.setEnabled(True)
         self._set_gh_btn.setStyleSheet(
-            "color:#00ff99; border-color:#00ff9944;" if on else ""
+            "color:#00ff99; border-color:#00ff9955;" if on else ""
         )
 
     def _settings_choose_dir(self):
         path = QFileDialog.getExistingDirectory(
-            self, "Choisir le dossier de téléchargement", self.dest_dir_ref[0]
+            self, "Choisir le dossier de téléchargement",
+            self.dest_dir_ref[0] if self.dest_dir_ref else ""
         )
         if path:
-            self.dest_dir_ref[0] = path
-            _save_config({"dest_dir": path})
-            self._set_dir_lbl.setText(path)
+            self._set_dir_edit.setText(path)
+            self._settings_apply_dir()
+
+    def _settings_apply_dir(self):
+        path = self._set_dir_edit.text().strip()
+        if not path:
+            return
+        try:
+            os.makedirs(path, exist_ok=True)
+            self.dest_dir_ref[0] = os.path.abspath(path)
+            _save_config({"dest_dir": self.dest_dir_ref[0]})
+            self._set_dir_edit.setText(self.dest_dir_ref[0])
             self._refresh_status()
+        except Exception as e:
+            self._msg("Erreur dossier", str(e))
 
     def _settings_toggle_gh(self):
         on = not self.cfg.get("github_fallback", False)
@@ -1256,6 +1314,112 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 #  Point d'entrée GUI
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _ask_dest_dir_gui(app_ref):
+    """
+    Dialogue obligatoire de premier lancement (PC, config absente).
+    - "Valider et démarrer" → retourne le chemin choisi (et SEULEMENT là le JSON sera créé).
+    - Bouton Quitter (en haut à droite) ou croix de fermeture → sys.exit(0), rien n'est créé.
+    """
+    from PyQt6.QtWidgets import (  # pylint: disable=import-error
+        QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+        QLineEdit, QPushButton, QFileDialog,
+    )
+    from PyQt6.QtCore import Qt  # pylint: disable=import-error
+
+    dlg = QDialog()
+    dlg.setWindowTitle("Ney-Chan — Configuration initiale")
+    dlg.setFixedSize(560, 280)
+    dlg.setStyleSheet(_QSS)
+
+    # Fermer la fenêtre (X de la barre titre ou barre des tâches) = quitter
+    def _on_close(event):
+        event.accept()
+        sys.exit(0)
+    dlg.closeEvent = _on_close
+
+    vlay = QVBoxLayout(dlg)
+    vlay.setContentsMargins(32, 22, 32, 24)
+    vlay.setSpacing(8)
+
+    # ── Ligne du haut : titre + bouton Quitter ────────────────────────────────
+    top_row = QHBoxLayout()
+    title = QLabel("🎌  Bienvenue dans Ney-Chan !")
+    title.setStyleSheet("color:#00d4ff; font-size:15px; font-weight:bold;")
+    top_row.addWidget(title, 1)
+
+    btn_quit = QPushButton("✖  Quitter")
+    btn_quit.setObjectName("danger")
+    btn_quit.setFixedSize(95, 28)
+    btn_quit.setStyleSheet(
+        "QPushButton { color:#ff6b6b; border:1px solid #ff6b6b55;"
+        " border-radius:5px; font-size:11px; padding:2px 8px; }"
+        "QPushButton:hover { background:#ff6b6b; color:#0d0d1a; }"
+    )
+    btn_quit.clicked.connect(lambda: sys.exit(0))
+    top_row.addWidget(btn_quit)
+    vlay.addLayout(top_row)
+
+    sub = QLabel("Aucune configuration trouvée. Choisissez un dossier de téléchargement.")
+    sub.setObjectName("subtitle")
+    vlay.addWidget(sub)
+
+    vlay.addSpacing(12)
+
+    # ── Champ + bouton Choisir ────────────────────────────────────────────────
+    row = QHBoxLayout()
+    edit = QLineEdit()
+    edit.setPlaceholderText("Chemin du dossier…")
+    edit.setFixedHeight(34)
+
+    btn_browse = QPushButton("📂 Choisir")
+    btn_browse.setFixedWidth(110)
+
+    def _browse():
+        p = QFileDialog.getExistingDirectory(dlg, "Choisir le dossier de téléchargement", "")
+        if p:
+            edit.setText(p)
+
+    btn_browse.clicked.connect(_browse)
+    row.addWidget(edit, 1)
+    row.addSpacing(6)
+    row.addWidget(btn_browse)
+    vlay.addLayout(row)
+
+    hint = QLabel("⚠  Ce dossier est obligatoire. Il recevra tous vos téléchargements.")
+    hint.setStyleSheet("color:#ffaa44; font-size:10px;")
+    vlay.addWidget(hint)
+
+    vlay.addStretch()
+
+    # ── Bouton Valider ────────────────────────────────────────────────────────
+    btn_ok = QPushButton("✔  Valider et démarrer")
+    btn_ok.setObjectName("success")
+    btn_ok.setFixedHeight(38)
+
+    result_holder = [None]
+
+    def _validate():
+        p = edit.text().strip()
+        if not p:
+            hint.setText("⚠  Veuillez saisir ou choisir un dossier avant de valider.")
+            hint.setStyleSheet("color:#ff6b6b; font-size:10px;")
+            return
+        try:
+            os.makedirs(p, exist_ok=True)
+            result_holder[0] = os.path.abspath(p)
+            dlg.accept()
+        except Exception as e:
+            hint.setText(f"⚠  Impossible de créer le dossier : {e}")
+            hint.setStyleSheet("color:#ff6b6b; font-size:10px;")
+
+    btn_ok.clicked.connect(_validate)
+    edit.returnPressed.connect(_validate)
+    vlay.addWidget(btn_ok)
+
+    dlg.exec()
+    return result_holder[0]
+
+
 def main_gui():
     """Lance l'interface PyQt6 (PC uniquement)."""
     # Désactive le clear terminal pour ne pas polluer l'éventuelle console
@@ -1280,7 +1444,7 @@ def main_gui():
     sl1.setStyleSheet("color:#00d4ff; font-size:26px; font-weight:bold;")
     sl1.setAlignment(Qt.AlignmentFlag.AlignCenter)
     sl2 = QLabel("Initialisation…")
-    sl2.setStyleSheet("color:#666680; font-size:11px;")
+    sl2.setStyleSheet("color:#7788aa; font-size:11px;")
     sl2.setAlignment(Qt.AlignmentFlag.AlignCenter)
     spb = QProgressBar()
     spb.setRange(0, 0)
@@ -1303,18 +1467,30 @@ def main_gui():
         splash.hide()
         splash.deleteLater()
 
-        # Résolution du dossier de destination
+        # ── Résolution du dossier de destination ────────────────────────────
+        config_exists = os.path.isfile(_config_path())
         saved = cfg.get("dest_dir", "")
-        if not saved or not os.path.isdir(saved):
+
+        if not config_exists:
+            # Premier lancement : demande obligatoire.
+            # Le JSON n'est créé QUE si l'utilisateur valide.
+            # Si l'utilisateur quitte, _ask_dest_dir_gui appelle sys.exit(0).
+            chosen = _ask_dest_dir_gui(app)
+            if chosen:
+                dest_ref[0] = chosen
+                _save_config({"dest_dir": chosen})
+            # Si chosen est None ici c'est impossible (sys.exit déjà appelé)
+        elif not saved or not os.path.isdir(saved):
+            # Config existe mais dossier invalide : fallback silencieux
             if IS_WINDOWS:
-                la       = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+                la = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
                 fallback = os.path.join(la, "Koyney", "Ney-Chan", "Downloads")
             else:
                 fallback = os.path.join(os.path.expanduser("~"), "Animes")
             try:
                 os.makedirs(fallback, exist_ok=True)
                 dest_ref[0] = fallback
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 dest_ref[0] = os.path.abspath(_BASE_DIR)
             _save_config({"dest_dir": dest_ref[0]})
         else:
@@ -1352,6 +1528,8 @@ def _load_config():
         return {}
 
 def _save_config(data):
+    if IS_TERMUX:
+        return  # Ne jamais créer/modifier de fichier config sur Termux/Android
     path = _config_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1944,7 +2122,7 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
     query_raw = ConsoleUI.input_screen(
         "RECHERCHER UN ANIME",
         "Nom de l'anime",
-        subtitle="La recherche utilise la base de donnees locale (dossier anime-sama/).",
+        subtitle="Recherche locale, puis GitHub (si actif), puis anime-sama.",
         allow_esc=True,
     )
     if not query_raw:
@@ -1953,21 +2131,9 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
     query   = normalize_query(query_raw)
     results = search_local(query)
 
+    # Si pas de résultat local : on tente directement avec le slug du query
     if not results:
-        choice = ConsoleUI.navigate(
-            [f"Chercher '{slug_to_display(query)}' sur anime-sama",
-             "Modifier la recherche",
-             "<  Retour"],
-            "AUCUN RESULTAT LOCAL",
-            f"Aucun anime trouve pour '{query_raw}' dans l'index local.",
-        )
-        if choice == 0:
-            results = [query]
-        elif choice == 1:
-            menu_search(dest_dir, ffmpeg_exe, cfg)
-            return
-        else:
-            return
+        results = [query]
 
     if len(results) == 1:
         slug = results[0]
@@ -1982,7 +2148,8 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
     anime_name = slug_to_display(slug)
 
     ConsoleUI.clear()
-    print(ConsoleUI.BANNER)
+    _sbanner = ConsoleUI.TERMUX_BANNER if IS_TERMUX else ConsoleUI.BANNER
+    print(_sbanner)
     print()
     ConsoleUI.info(f"Chargement des donnees pour {ConsoleUI.BOLD}{anime_name}{ConsoleUI.RESET}...")
 
@@ -1993,19 +2160,19 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
         anime_data = load_anime_github(slug)
 
     if anime_data is None:
-        ConsoleUI.info("Non trouve -> scraping anime-sama en direct...")
+        ConsoleUI.info("Non trouve en local/GitHub -> scraping anime-sama en direct...")
         anime_data = scrape_anime_data(slug)
 
     if anime_data is None:
         ConsoleUI.result_screen([
-            f"  {ConsoleUI.RED}X  Anime introuvable : {anime_name}{ConsoleUI.RESET}",
+            f"  {ConsoleUI.RED}✖  Anime introuvable : {anime_name}{ConsoleUI.RESET}",
             f"  {ConsoleUI.DIM}Verifiez le nom ou sa disponibilite sur anime-sama.{ConsoleUI.RESET}",
         ])
         return
 
     if not anime_data:
         ConsoleUI.result_screen([
-            f"  {ConsoleUI.YELLOW}!  {anime_name} existe mais "
+            f"  {ConsoleUI.YELLOW}⚠  {anime_name} existe mais "
             f"aucune video n'est disponible (manga uniquement ?).{ConsoleUI.RESET}",
         ])
         return
@@ -2013,7 +2180,7 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
     langs_dispo = [l for l in ALL_LANGUAGES if l in anime_data]
     if not langs_dispo:
         ConsoleUI.result_screen([
-            f"  {ConsoleUI.RED}X  Aucune langue disponible pour {anime_name}.{ConsoleUI.RESET}",
+            f"  {ConsoleUI.RED}✖  Aucune langue disponible pour {anime_name}.{ConsoleUI.RESET}",
         ])
         return
 
@@ -2030,6 +2197,12 @@ def menu_search(dest_dir, ffmpeg_exe, cfg):
 #  Menu Parametres
 # ══════════════════════════════════════════════════════════════════════════════
 def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
+    # Sur Termux/PC sans token : forcer github_fallback à False si token absent
+    if not GITHUB_TOKEN:
+        cfg["github_fallback"] = False
+        if not IS_TERMUX:
+            _save_config({"github_fallback": False})
+
     while True:
         github_on   = cfg.get("github_fallback", False)
         github_etat = (f"{ConsoleUI.GREEN}actif{ConsoleUI.RESET}"
@@ -2038,12 +2211,18 @@ def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
                        if GITHUB_TOKEN else f"{ConsoleUI.YELLOW}manquant (.env){ConsoleUI.RESET}")
         ffmpeg_info = os.path.basename(ffmpeg_exe) if ffmpeg_exe else "introuvable"
 
-        opts = [
-            f"Dossier de telechargement   ({dest_dir_ref[0]})",
-            f"GitHub fallback : {github_etat}  [token : {token_ok}]",
-            f"FFmpeg : {ffmpeg_info}",
-            "<  Retour",
-        ]
+        if IS_TERMUX:
+            opts = [
+                f"Dossier de telechargement   ({dest_dir_ref[0]})",
+                f"GitHub fallback : {github_etat}  [token : {token_ok}]",
+                "<  Retour",
+            ]
+        else:
+            opts = [
+                f"Dossier de telechargement   ({dest_dir_ref[0]})",
+                f"GitHub fallback : {github_etat}  [token : {token_ok}]",
+                "<  Retour",
+            ]
         choice = ConsoleUI.navigate(opts, "PARAMETRES")
 
         if choice == 0:
@@ -2058,30 +2237,33 @@ def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
                     os.makedirs(new, exist_ok=True)
                     dest_dir_ref[0] = os.path.abspath(new)
                     cfg["dest_dir"] = dest_dir_ref[0]
-                    _save_config({"dest_dir": dest_dir_ref[0]})
+                    if not IS_TERMUX:
+                        _save_config({"dest_dir": dest_dir_ref[0]})
                     ConsoleUI.result_screen([
-                        f"  {ConsoleUI.GREEN}OK Dossier mis a jour.{ConsoleUI.RESET}",
-                        f"  {ConsoleUI.CYAN}  {dest_dir_ref[0]}{ConsoleUI.RESET}",
+                        f"  {ConsoleUI.GREEN}✔  Dossier mis a jour.{ConsoleUI.RESET}",
+                        f"  {ConsoleUI.CYAN}   {dest_dir_ref[0]}{ConsoleUI.RESET}",
+                        *([] if not IS_TERMUX else [
+                            f"  {ConsoleUI.YELLOW}⚠  Changement temporaire (non sauvegarde).{ConsoleUI.RESET}",
+                        ]),
                     ])
                 except Exception as e:
-                    ConsoleUI.result_screen([f"  {ConsoleUI.RED}X  {e}{ConsoleUI.RESET}"])
+                    ConsoleUI.result_screen([f"  {ConsoleUI.RED}✖  {e}{ConsoleUI.RESET}"])
 
         elif choice == 1:
-            cfg["github_fallback"] = not github_on
-            _save_config({"github_fallback": cfg["github_fallback"]})
-            etat = "active" if cfg["github_fallback"] else "desactive"
-            ConsoleUI.result_screen([
-                f"  {ConsoleUI.GREEN}OK GitHub fallback {etat}.{ConsoleUI.RESET}",
-                *([] if GITHUB_TOKEN else [
-                    f"  {ConsoleUI.YELLOW}!  GITHUB_TOKEN manquant dans le fichier .env.{ConsoleUI.RESET}",
-                ]),
-            ])
-
-        elif choice == 2:
-            ConsoleUI.result_screen([
-                f"  {ConsoleUI.CYAN}FFmpeg{ConsoleUI.RESET}",
-                f"  {ConsoleUI.DIM}{ffmpeg_exe or 'Non trouve'}{ConsoleUI.RESET}",
-            ])
+            if not GITHUB_TOKEN:
+                ConsoleUI.result_screen([
+                    f"  {ConsoleUI.YELLOW}⚠  GitHub fallback desactive automatiquement.{ConsoleUI.RESET}",
+                    f"  {ConsoleUI.DIM}Aucun GITHUB_TOKEN trouve dans le fichier .env.{ConsoleUI.RESET}",
+                    f"  {ConsoleUI.DIM}Ajoutez GITHUB_TOKEN=<votre_token> dans .env pour activer.{ConsoleUI.RESET}",
+                ])
+            else:
+                cfg["github_fallback"] = not github_on
+                if not IS_TERMUX:
+                    _save_config({"github_fallback": cfg["github_fallback"]})
+                etat = "active" if cfg["github_fallback"] else "desactive"
+                ConsoleUI.result_screen([
+                    f"  {ConsoleUI.GREEN}✔  GitHub fallback {etat}.{ConsoleUI.RESET}",
+                ])
 
         else:
             break
@@ -2096,6 +2278,7 @@ def init_dest_dir(cfg):
     config_ok  = os.path.isfile(_config_path())
 
     if IS_TERMUX:
+        # Sur Termux : dossier par défaut fixe, jamais sauvegardé.
         if saved and os.path.isdir(saved):
             return saved
         fallback = "/storage/emulated/0/Download/Animes"
@@ -2103,8 +2286,11 @@ def init_dest_dir(cfg):
             os.makedirs(fallback, exist_ok=True)
         except Exception:
             fallback = os.path.join(os.path.expanduser("~"), "Animes")
-            os.makedirs(fallback, exist_ok=True)
-        _save_config({"dest_dir": fallback})
+            try:
+                os.makedirs(fallback, exist_ok=True)
+            except Exception:
+                pass
+        # NE PAS appeler _save_config sur Termux
         return fallback
 
     def _ask_new(allow_cancel=False):
@@ -2189,7 +2375,8 @@ def main():
         os.system("title Ney-Chan -- Anime Downloader")
 
     ConsoleUI.clear()
-    print(ConsoleUI.BANNER)
+    _startup_banner = ConsoleUI.TERMUX_BANNER if IS_TERMUX else ConsoleUI.BANNER
+    print(_startup_banner)
     print(f"\n  {ConsoleUI.DIM}Initialisation, veuillez patienter...{ConsoleUI.RESET}\n")
 
     setup_dependencies()
@@ -2233,7 +2420,8 @@ def main():
 def _goodbye():
     try:
         ConsoleUI.clear()
-        print(ConsoleUI.BANNER)
+        _bye_banner = ConsoleUI.TERMUX_BANNER if IS_TERMUX else ConsoleUI.BANNER
+        print(_bye_banner)
         print(f"\n  {ConsoleUI.CYAN}A bientot !{ConsoleUI.RESET}\n")
         time.sleep(0.8)
     except Exception:
