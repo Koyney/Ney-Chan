@@ -597,6 +597,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
     PAGE_EP_INPUT = 4
     PAGE_SETTINGS = 5
     PAGE_DOWNLOAD = 6
+    PAGE_WHAT_DL  = 7
 
     def __init__(self, cfg, dest_dir_ref, ffmpeg_exe):
         super().__init__()
@@ -618,6 +619,22 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_queue     = []
         self._dl_queue_ctx = None
         self._dl_queue_res = (0, 0)
+
+        # État de la page QUE TÉLÉCHARGER ?
+        self._whatdl_saisons      = []
+        self._whatdl_lang_data    = {}
+        self._whatdl_sel_idx      = 0
+        self._whatdl_back         = None
+        self._whatdl_saison_btns  = []
+
+        # État étendu de la page saisie d'épisode
+        self._ep_cancel_cb        = None   # Annuler (haut-gauche) → QUE TELECHARGER ?
+        self._ep_back_cb          = None   # Retour (bas-gauche) → étape précédente
+        self._ep_prompt_fn        = None   # callable(n) → prompt texte
+        self._ep_saisons_ep       = []     # saisons pour le sélecteur de la page épisode
+        self._ep_lang_data_ep     = {}
+        self._ep_sel_idx_ep       = 0
+        self._ep_saison_btns_ep   = []
 
         self._setup_window()
         self._build_ui()
@@ -655,6 +672,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
             self._build_page_ep_input,
             self._build_page_settings,
             self._build_page_download,
+            self._build_page_what_dl,
         ):
             self._stack.addWidget(builder())
 
@@ -794,33 +812,66 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
     def _build_page_ep_input(self):
         page = QWidget()
         lay  = QVBoxLayout(page)
-        lay.setContentsMargins(48, 40, 48, 40)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._ep_title_lbl = QLabel("NUMÉRO D'ÉPISODE")
-        self._ep_title_lbl.setObjectName("title")
-        lay.addWidget(self._ep_title_lbl)
+        lay.setContentsMargins(48, 20, 48, 32)
+
+        # ── Barre supérieure : bouton Annuler (gauche) ────────────────────────
+        top_row = QHBoxLayout()
+        self._ep_cancel_top_btn = QPushButton("✖  Annuler")
+        self._ep_cancel_top_btn.setObjectName("danger")
+        self._ep_cancel_top_btn.setFixedWidth(115)
+        self._ep_cancel_top_btn.clicked.connect(self._ep_cancel_top)
+        self._ep_cancel_top_btn.setVisible(False)
+        top_row.addWidget(self._ep_cancel_top_btn)
+        top_row.addStretch()
+        lay.addLayout(top_row)
+        lay.addSpacing(10)
+
+        # ── Mode de téléchargement ────────────────────────────────────────────
+        self._ep_mode_lbl = QLabel("")
+        self._ep_mode_lbl.setObjectName("title")
+        lay.addWidget(self._ep_mode_lbl)
         self._ep_sub_lbl = QLabel("")
         self._ep_sub_lbl.setObjectName("subtitle")
         lay.addWidget(self._ep_sub_lbl)
-        lay.addSpacing(22)
+
+        lay.addStretch()
+
+        # ── SpinBox ───────────────────────────────────────────────────────────
         self._ep_spin = QSpinBox()
         self._ep_spin.setRange(1, 9999)
         self._ep_spin.setFixedSize(130, 42)
         self._ep_spin.setFont(QFont("Consolas", 14))
         lay.addWidget(self._ep_spin, 0, Qt.AlignmentFlag.AlignCenter)
-        lay.addSpacing(22)
-        row = QHBoxLayout()
-        btn_cancel = QPushButton("Annuler")
-        btn_cancel.clicked.connect(self._ep_cancel)
-        btn_ok     = QPushButton("Confirmer →")
-        btn_ok.clicked.connect(self._ep_confirm)
-        row.addStretch()
-        row.addWidget(btn_cancel)
-        row.addSpacing(10)
-        row.addWidget(btn_ok)
-        row.addStretch()
-        lay.addLayout(row)
+
         lay.addStretch()
+
+        # ── Sélecteur de saison (optionnel) ───────────────────────────────────
+        self._ep_saison_lbl = QLabel("SAISON")
+        self._ep_saison_lbl.setObjectName("section")
+        self._ep_saison_lbl.setVisible(False)
+        lay.addWidget(self._ep_saison_lbl)
+        lay.addSpacing(6)
+
+        self._ep_saison_container = QWidget()
+        self._ep_saison_hlay = QHBoxLayout(self._ep_saison_container)
+        self._ep_saison_hlay.setContentsMargins(0, 0, 0, 0)
+        self._ep_saison_hlay.setSpacing(8)
+        self._ep_saison_container.setVisible(False)
+        lay.addWidget(self._ep_saison_container)
+        lay.addSpacing(14)
+
+        # ── Boutons de navigation ─────────────────────────────────────────────
+        nav_row = QHBoxLayout()
+        self._ep_back_btn = QPushButton("← Retour")
+        self._ep_back_btn.setVisible(False)
+        self._ep_back_btn.clicked.connect(self._ep_back_action)
+        self._ep_ok_btn = QPushButton("Confirmer →")
+        self._ep_ok_btn.clicked.connect(self._ep_confirm)
+        nav_row.addWidget(self._ep_back_btn)
+        nav_row.addStretch()
+        nav_row.addWidget(self._ep_ok_btn)
+        lay.addLayout(nav_row)
+
         return page
 
     def _build_page_settings(self):  # pylint: disable=too-many-locals
@@ -962,6 +1013,51 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addLayout(row)
         return page
 
+    def _build_page_what_dl(self):
+        """Page 'QUE TÉLÉCHARGER ?' avec sélecteur de saison intégré en bas."""
+        page = QWidget()
+        lay  = QVBoxLayout(page)
+        lay.setContentsMargins(48, 24, 48, 24)
+
+        self._whatdl_title_lbl = QLabel("QUE TÉLÉCHARGER ?")
+        self._whatdl_title_lbl.setObjectName("title")
+        lay.addWidget(self._whatdl_title_lbl)
+        self._whatdl_sub_lbl = QLabel("")
+        self._whatdl_sub_lbl.setObjectName("subtitle")
+        lay.addWidget(self._whatdl_sub_lbl)
+        lay.addSpacing(10)
+
+        self._whatdl_list = QListWidget()
+        self._whatdl_list.itemDoubleClicked.connect(lambda _: self._whatdl_select())
+        lay.addWidget(self._whatdl_list, 1)
+        lay.addSpacing(12)
+
+        # ── Sélecteur de saison ───────────────────────────────────────────────
+        self._whatdl_saison_lbl = QLabel("SAISON")
+        self._whatdl_saison_lbl.setObjectName("section")
+        lay.addWidget(self._whatdl_saison_lbl)
+        lay.addSpacing(6)
+
+        self._whatdl_saison_container = QWidget()
+        self._whatdl_saison_hlay = QHBoxLayout(self._whatdl_saison_container)
+        self._whatdl_saison_hlay.setContentsMargins(0, 0, 0, 0)
+        self._whatdl_saison_hlay.setSpacing(8)
+        lay.addWidget(self._whatdl_saison_container)
+        lay.addSpacing(14)
+
+        # ── Boutons de navigation ─────────────────────────────────────────────
+        nav_row = QHBoxLayout()
+        self._whatdl_back_btn = QPushButton("← Retour")
+        self._whatdl_back_btn.clicked.connect(self._whatdl_back_action)
+        self._whatdl_sel_btn  = QPushButton("Sélectionner →")
+        self._whatdl_sel_btn.clicked.connect(self._whatdl_select)
+        nav_row.addWidget(self._whatdl_back_btn)
+        nav_row.addStretch()
+        nav_row.addWidget(self._whatdl_sel_btn)
+        lay.addLayout(nav_row)
+
+        return page
+
     # ── Navigation ─────────────────────────────────────────────────────────────
 
     def _go(self, page_idx):
@@ -996,20 +1092,110 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
             self._list_cb(row)
 
     def _list_back_action(self):
-        self._go(self._list_back)
+        if callable(self._list_back):
+            self._list_back()
+        else:
+            self._go(self._list_back)
 
-    def _ask_ep(self, prompt, max_val, min_val, callback):
-        """Affiche la page saisie d'épisode et appelle callback(n) à la confirmation."""
-        self._ep_title_lbl.setText("NUMÉRO D'ÉPISODE")
-        self._ep_sub_lbl.setText(prompt)
+    def _ask_ep(self, prompt_fn_or_str, max_val, min_val, callback,
+                mode_label="NUMÉRO D'ÉPISODE",
+                cancel_cb=None,
+                back_action=None,
+                show_saison=False, saisons=None, lang_data=None, sel_idx=0):
+        """Affiche la page saisie d'épisode (version enrichie).
+
+        prompt_fn_or_str : str fixe OU callable(n) → str
+        cancel_cb        : callable → Annuler (haut-gauche, retour QUE TELECHARGER)
+        back_action      : callable → Retour  (bas-gauche, étape précédente)
+        show_saison      : afficher le sélecteur de saison
+        """
+        # Prompt
+        if callable(prompt_fn_or_str):
+            self._ep_prompt_fn = prompt_fn_or_str
+        else:
+            self._ep_prompt_fn = lambda _n, _s=prompt_fn_or_str: _s
+
+        self._ep_mode_lbl.setText(mode_label)
+        self._ep_sub_lbl.setText(self._ep_prompt_fn(max_val))
         self._ep_spin.setRange(min_val, max_val)
         self._ep_spin.setValue(min_val)
         self._ep_cb   = callback
         self._ep_back = self._stack.currentIndex()
+
+        # Annuler haut-gauche
+        self._ep_cancel_cb = cancel_cb
+        self._ep_cancel_top_btn.setVisible(cancel_cb is not None)
+
+        # Retour bas-gauche
+        self._ep_back_cb = back_action
+        self._ep_back_btn.setVisible(back_action is not None)
+
+        # Sélecteur de saison
+        if show_saison and saisons and lang_data:
+            self._ep_saisons_ep     = list(saisons)
+            self._ep_lang_data_ep   = lang_data
+            self._ep_sel_idx_ep     = sel_idx
+            self._ep_saison_lbl.setVisible(True)
+            self._ep_saison_container.setVisible(True)
+            self._ep_rebuild_saison_btns()
+        else:
+            self._ep_saison_lbl.setVisible(False)
+            self._ep_saison_container.setVisible(False)
+
         self._go(self.PAGE_EP_INPUT)
+
+    def _ep_rebuild_saison_btns(self):
+        while self._ep_saison_hlay.count():
+            item = self._ep_saison_hlay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._ep_saison_btns_ep = []
+        for i, k in enumerate(self._ep_saisons_ep):
+            disp, _, _, _ = saison_key_info(k)
+            btn = QPushButton(disp)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(lambda _c, idx=i: self._ep_pick_saison(idx))
+            self._ep_saison_hlay.addWidget(btn)
+            self._ep_saison_btns_ep.append(btn)
+        self._ep_saison_hlay.addStretch()
+        self._ep_refresh_saison_btns()
+
+    def _ep_pick_saison(self, idx):
+        self._ep_sel_idx_ep = idx
+        skey = self._ep_saisons_ep[idx]
+        n    = count_episodes(self._ep_lang_data_ep[skey])
+        self._ep_spin.setRange(1, n)
+        self._ep_spin.setValue(1)
+        if self._ep_prompt_fn:
+            self._ep_sub_lbl.setText(self._ep_prompt_fn(n))
+        self._ep_refresh_saison_btns()
+
+    def _ep_refresh_saison_btns(self):
+        _ACTIVE = (
+            "background-color:#00d4ff; color:#0d0d1a; border:1px solid #00d4ff;"
+            "border-radius:6px; padding:4px 14px;"
+            "font-family:Consolas,'Courier New',monospace;"
+        )
+        for i, btn in enumerate(self._ep_saison_btns_ep):
+            btn.setStyleSheet(_ACTIVE if i == self._ep_sel_idx_ep else "")
+
+    def _ep_cancel_top(self):
+        if callable(self._ep_cancel_cb):
+            self._ep_cancel_cb()
+        else:
+            self._go(self.PAGE_WHAT_DL)
+
+    def _ep_back_action(self):
+        if callable(self._ep_back_cb):
+            self._ep_back_cb()
+        else:
+            self._go(self._ep_back)
 
     def _ep_confirm(self):
         val = self._ep_spin.value()
+        # Mise à jour de la saison si le sélecteur est actif
+        if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep:
+            self._saison_key = self._ep_saisons_ep[self._ep_sel_idx_ep]
         if self._ep_cb:
             self._ep_cb(val)
 
@@ -1084,64 +1270,170 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         if not saisons:
             self._msg("Aucune saison", f"Aucune saison disponible en {lang.upper()}.")
             return
-        if len(saisons) == 1:
-            self._on_saison(saisons[0])
-            return
-        opts = []
-        for k in saisons:
-            d, _, _, _ = saison_key_info(k)
-            n = count_episodes(lang_data[k])
-            opts.append(f"{d}  ({n} épisode(s))")
-        self._show_list(
-            opts,
-            "CHOISIR UNE SAISON",
-            f"{self._anime_name}  —  {lang.upper()}",
-            lambda idx, ss=saisons: self._on_saison(ss[idx]),
-            back=self.PAGE_LIST,
-        )
 
-    def _on_saison(self, saison_key):
-        self._saison_key = saison_key
-        lang_data  = self._anime_data.get(self._lang, {})
+        def _back_to_langs():
+            langs = [l for l in ALL_LANGUAGES if l in self._anime_data]
+            self._show_list(
+                [LANG_LABELS.get(l, l.upper()) for l in langs],
+                "CHOISIR UNE LANGUE",
+                self._anime_name,
+                lambda idx, ls=langs: self._on_lang(ls[idx]),
+                back=self.PAGE_SEARCH,
+            )
+
+        self._show_what_download(lang, lang_data, saisons, back_fn=_back_to_langs)
+
+    # ── Page QUE TÉLÉCHARGER ? ─────────────────────────────────────────────────
+
+    def _show_what_download(self, lang, lang_data, saisons, back_fn=None):
+        """Peuple et affiche la page QUE TÉLÉCHARGER ? avec sélecteur de saison."""
+        self._whatdl_saisons    = saisons
+        self._whatdl_lang_data  = lang_data
+        self._whatdl_sel_idx    = 0
+        self._whatdl_back       = back_fn
+
         total_all  = sum(count_episodes(lang_data[k]) for k in lang_data)
-        nb_saisons = len(lang_data)
-        n          = count_episodes(lang_data.get(saison_key, []))
-        disp, _, _, _ = saison_key_info(saison_key)
-        self._show_list(
-            [
-                f"Toute la série  ({total_all} ep. — {nb_saisons} saison(s))",
-                f"Toute la saison  ({n} épisode(s))",
-                "Un épisode spécifique",
-                "D'un épisode X à Y",
-                "Depuis un épisode",
-            ],
-            "QUE TÉLÉCHARGER ?",
-            f"{self._anime_name}  —  {self._lang.upper()}  —  {disp}",
-            lambda idx, n_=n, ld=lang_data: self._on_what(idx, n_, ld),
-            back=self.PAGE_LIST,
+        nb_saisons = len(saisons)
+
+        self._whatdl_sub_lbl.setText(f"{self._anime_name}  —  {lang.upper()}")
+
+        self._whatdl_list.clear()
+        self._whatdl_list.addItem(f"Toute la série  ({total_all} ep. — {nb_saisons} saison(s))")
+        self._whatdl_list.addItem("")          # "Toute la saison", mis à jour par _whatdl_refresh
+        self._whatdl_list.addItem("Un épisode spécifique")
+        self._whatdl_list.addItem("D'un épisode X à Y")
+        self._whatdl_list.addItem("Depuis un épisode")
+        self._whatdl_list.setCurrentRow(0)
+
+        # Reconstruction des boutons de saison
+        while self._whatdl_saison_hlay.count():
+            item = self._whatdl_saison_hlay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._whatdl_saison_btns = []
+
+        for i, k in enumerate(saisons):
+            disp, _, _, _ = saison_key_info(k)
+            btn = QPushButton(disp)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(lambda _checked, idx=i: self._whatdl_pick_saison(idx))
+            self._whatdl_saison_hlay.addWidget(btn)
+            self._whatdl_saison_btns.append(btn)
+        self._whatdl_saison_hlay.addStretch()
+
+        self._whatdl_saison_lbl.setVisible(nb_saisons > 1)
+        self._whatdl_saison_container.setVisible(nb_saisons > 1)
+
+        self._whatdl_refresh()
+        self._go(self.PAGE_WHAT_DL)
+
+    def _whatdl_refresh(self):
+        saisons   = self._whatdl_saisons
+        lang_data = self._whatdl_lang_data
+        sel       = self._whatdl_sel_idx
+        skey      = saisons[sel]
+        n         = count_episodes(lang_data[skey])
+
+        item = self._whatdl_list.item(1)
+        if item:
+            item.setText(f"Toute la saison  ({n} épisode(s))")
+
+        _ACTIVE = (
+            "background-color:#00d4ff; color:#0d0d1a; border:1px solid #00d4ff;"
+            "border-radius:6px; padding:4px 14px;"
+            "font-family:Consolas,'Courier New',monospace;"
         )
+        for i, btn in enumerate(self._whatdl_saison_btns):
+            btn.setStyleSheet(_ACTIVE if i == sel else "")
 
-    def _on_what(self, choice, n, lang_data):  # pylint: disable=too-many-branches
-        slug  = self._slug
-        data  = self._anime_data
-        lang  = self._lang
-        skey  = self._saison_key
+    def _whatdl_pick_saison(self, idx):
+        self._whatdl_sel_idx = idx
+        self._whatdl_refresh()
 
-        if choice == 0:
-            self._start_series(slug, data, lang, list(lang_data.keys()), lang_data)
-        elif choice == 1:
+    def _whatdl_back_action(self):
+        if callable(self._whatdl_back):
+            self._whatdl_back()
+        else:
+            self._go(self._whatdl_back if self._whatdl_back is not None else self.PAGE_MAIN)
+
+    def _whatdl_select(self):  # pylint: disable=too-many-locals
+        row       = self._whatdl_list.currentRow()
+        if row < 0:
+            return
+        slug      = self._slug
+        data      = self._anime_data
+        lang      = self._lang
+        saisons   = self._whatdl_saisons
+        lang_data = self._whatdl_lang_data
+        sel       = self._whatdl_sel_idx
+        skey      = saisons[sel]
+        n         = count_episodes(lang_data[skey])
+        self._saison_key = skey
+
+        _cancel = lambda: self._go(self.PAGE_WHAT_DL)  # pylint: disable=unnecessary-lambda-assignment
+
+        if row == 0:
+            # Toute la série
+            self._start_series(slug, data, lang, saisons, lang_data)
+
+        elif row == 1:
+            # Toute la saison sélectionnée
             self._start_dl(slug, data, lang, skey, (0, n - 1))
-        elif choice == 2:
-            self._ask_ep(f"Épisode à télécharger (1-{n})", n, 1,
-                         lambda ep: self._start_dl(slug, data, lang, skey, (ep - 1, ep - 1)))
-        elif choice == 3:
-            def _ask_y(x):
-                self._ask_ep(f"Épisode de fin ({x}-{n})", n, x,
-                             lambda y, x_=x: self._start_dl(slug, data, lang, skey, (x_ - 1, y - 1)))
-            self._ask_ep(f"Épisode de départ (1-{n})", n, 1, _ask_y)
-        elif choice == 4:
-            self._ask_ep(f"Depuis l'épisode (1-{n})", n, 1,
-                         lambda ep: self._start_dl(slug, data, lang, skey, (ep - 1, n - 1)))
+
+        elif row == 2:
+            # Un épisode spécifique — avec sélecteur de saison
+            def _do_ep_specific(ep):
+                actual_skey = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey
+                self._saison_key = actual_skey
+                self._start_dl(slug, data, lang, actual_skey, (ep - 1, ep - 1))
+
+            self._ask_ep(
+                lambda n_: f"Épisode à télécharger (1-{n_})", n, 1, _do_ep_specific,
+                mode_label="UN ÉPISODE SPÉCIFIQUE",
+                cancel_cb=_cancel,
+                show_saison=True, saisons=saisons, lang_data=lang_data, sel_idx=sel,
+            )
+
+        elif row == 3:
+            # D'un épisode X à Y — sélecteur de saison sur étape X, Retour sur étape Y
+            def _ask_x():
+                skey_x = saisons[sel]
+                n_x    = count_episodes(lang_data[skey_x])
+
+                def _ask_y(x):
+                    # Saison verrouillée sur le choix fait en étape X
+                    actual_skey = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_x
+                    actual_n    = count_episodes(lang_data[actual_skey])
+                    self._saison_key = actual_skey
+
+                    def _do_dl(y):
+                        self._start_dl(slug, data, lang, actual_skey, (x - 1, y - 1))
+
+                    self._ask_ep(
+                        lambda n_: f"Épisode de fin ({x}-{n_})", actual_n, x, _do_dl,
+                        mode_label="D'UN ÉPISODE X À Y  —  Choix de l'épisode de fin (Y)",
+                        cancel_cb=_cancel,
+                        back_action=_ask_x,
+                        show_saison=False,
+                    )
+
+                self._ask_ep(
+                    lambda n_: f"Épisode de départ (1-{n_})", n_x, 1, _ask_y,
+                    mode_label="D'UN ÉPISODE X À Y  —  Choix de l'épisode de départ (X)",
+                    cancel_cb=_cancel,
+                    show_saison=True, saisons=saisons, lang_data=lang_data, sel_idx=sel,
+                )
+
+            _ask_x()
+
+        elif row == 4:
+            # Depuis un épisode
+            self._ask_ep(
+                lambda n_: f"Depuis l'épisode (1-{n_})", n, 1,
+                lambda ep: self._start_dl(slug, data, lang, skey, (ep - 1, n - 1)),
+                mode_label="DEPUIS UN ÉPISODE",
+                cancel_cb=_cancel,
+            )
 
     # ── Téléchargement ─────────────────────────────────────────────────────────
 
