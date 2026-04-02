@@ -853,9 +853,9 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addSpacing(6)
 
         self._ep_saison_container = QWidget()
-        self._ep_saison_hlay = QHBoxLayout(self._ep_saison_container)
-        self._ep_saison_hlay.setContentsMargins(0, 0, 0, 0)
-        self._ep_saison_hlay.setSpacing(8)
+        self._ep_saison_vlay = QVBoxLayout(self._ep_saison_container)
+        self._ep_saison_vlay.setContentsMargins(0, 0, 0, 0)
+        self._ep_saison_vlay.setSpacing(6)
         self._ep_saison_container.setVisible(False)
         lay.addWidget(self._ep_saison_container)
         lay.addSpacing(14)
@@ -1039,9 +1039,9 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addSpacing(6)
 
         self._whatdl_saison_container = QWidget()
-        self._whatdl_saison_hlay = QHBoxLayout(self._whatdl_saison_container)
-        self._whatdl_saison_hlay.setContentsMargins(0, 0, 0, 0)
-        self._whatdl_saison_hlay.setSpacing(8)
+        self._whatdl_saison_vlay = QVBoxLayout(self._whatdl_saison_container)
+        self._whatdl_saison_vlay.setContentsMargins(0, 0, 0, 0)
+        self._whatdl_saison_vlay.setSpacing(6)
         lay.addWidget(self._whatdl_saison_container)
         lay.addSpacing(14)
 
@@ -1145,19 +1145,31 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._go(self.PAGE_EP_INPUT)
 
     def _ep_rebuild_saison_btns(self):
-        while self._ep_saison_hlay.count():
-            item = self._ep_saison_hlay.takeAt(0)
+        vlay_s = self._ep_saison_vlay
+        while vlay_s.count():
+            item = vlay_s.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._ep_saison_btns_ep = []
-        for i, k in enumerate(self._ep_saisons_ep):
-            disp, _, _, _ = saison_key_info(k)
-            btn = QPushButton(disp)
-            btn.setFixedHeight(32)
-            btn.clicked.connect(lambda _c, idx=i: self._ep_pick_saison(idx))
-            self._ep_saison_hlay.addWidget(btn)
-            self._ep_saison_btns_ep.append(btn)
-        self._ep_saison_hlay.addStretch()
+
+        _MAX_PER_ROW = 6
+        for row_start in range(0, len(self._ep_saisons_ep), _MAX_PER_ROW):
+            row_w = QWidget()
+            row_w.setStyleSheet("background: transparent;")
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(8)
+            for i in range(row_start, min(row_start + _MAX_PER_ROW, len(self._ep_saisons_ep))):
+                k = self._ep_saisons_ep[i]
+                disp, _, _, _ = saison_key_info(k)
+                btn = QPushButton(disp)
+                btn.setFixedHeight(32)
+                btn.clicked.connect(lambda _c, idx=i: self._ep_pick_saison(idx))
+                row_h.addWidget(btn)
+                self._ep_saison_btns_ep.append(btn)
+            row_h.addStretch()
+            vlay_s.addWidget(row_w)
+
         self._ep_refresh_saison_btns()
 
     def _ep_pick_saison(self, idx):
@@ -1305,21 +1317,31 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._whatdl_list.addItem("Depuis un épisode")
         self._whatdl_list.setCurrentRow(0)
 
-        # Reconstruction des boutons de saison
-        while self._whatdl_saison_hlay.count():
-            item = self._whatdl_saison_hlay.takeAt(0)
+        # Reconstruction des boutons de saison (multi-lignes si beaucoup de saisons)
+        vlay_s = self._whatdl_saison_vlay
+        while vlay_s.count():
+            item = vlay_s.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._whatdl_saison_btns = []
 
-        for i, k in enumerate(saisons):
-            disp, _, _, _ = saison_key_info(k)
-            btn = QPushButton(disp)
-            btn.setFixedHeight(32)
-            btn.clicked.connect(lambda _checked, idx=i: self._whatdl_pick_saison(idx))
-            self._whatdl_saison_hlay.addWidget(btn)
-            self._whatdl_saison_btns.append(btn)
-        self._whatdl_saison_hlay.addStretch()
+        _MAX_PER_ROW = 6
+        for row_start in range(0, len(saisons), _MAX_PER_ROW):
+            row_w = QWidget()
+            row_w.setStyleSheet("background: transparent;")
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(8)
+            for i in range(row_start, min(row_start + _MAX_PER_ROW, len(saisons))):
+                k = saisons[i]
+                disp, _, _, _ = saison_key_info(k)
+                btn = QPushButton(disp)
+                btn.setFixedHeight(32)
+                btn.clicked.connect(lambda _checked, idx=i: self._whatdl_pick_saison(idx))
+                row_h.addWidget(btn)
+                self._whatdl_saison_btns.append(btn)
+            row_h.addStretch()
+            vlay_s.addWidget(row_w)
 
         self._whatdl_saison_lbl.setVisible(nb_saisons > 1)
         self._whatdl_saison_container.setVisible(nb_saisons > 1)
@@ -1401,20 +1423,23 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                 n_x    = count_episodes(lang_data[skey_x])
 
                 def _ask_y(x):
-                    # Saison verrouillée sur le choix fait en étape X
-                    actual_skey = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_x
-                    actual_n    = count_episodes(lang_data[actual_skey])
-                    self._saison_key = actual_skey
+                    # Saison choisie à l'étape X → point de départ pour l'étape Y
+                    skey_from_x = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_x
+                    sel_from_x  = self._ep_sel_idx_ep if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else sel
+                    n_from_x    = count_episodes(lang_data[skey_from_x])
 
                     def _do_dl(y):
-                        self._start_dl(slug, data, lang, actual_skey, (x - 1, y - 1))
+                        # Saison éventuellement modifiée à l'étape Y
+                        actual_skey_y = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_from_x
+                        self._saison_key = actual_skey_y
+                        self._start_dl(slug, data, lang, actual_skey_y, (x - 1, y - 1))
 
                     self._ask_ep(
-                        lambda n_: f"Épisode de fin ({x}-{n_})", actual_n, x, _do_dl,
+                        lambda n_: f"Épisode de fin (1-{n_})", n_from_x, 1, _do_dl,
                         mode_label="D'UN ÉPISODE X À Y  —  Choix de l'épisode de fin (Y)",
                         cancel_cb=_cancel,
                         back_action=_ask_x,
-                        show_saison=False,
+                        show_saison=True, saisons=saisons, lang_data=lang_data, sel_idx=sel_from_x,
                     )
 
                 self._ask_ep(
