@@ -341,11 +341,11 @@ if IS_PC:
     try:
         from PyQt6.QtWidgets import (  # pylint: disable=import-error
             QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-            QPushButton, QLabel, QLineEdit, QListWidget, QProgressBar,
+            QLayout, QPushButton, QLabel, QLineEdit, QListWidget, QProgressBar,
             QTextEdit, QStackedWidget, QFileDialog, QMessageBox, QSpinBox,
         )
         from PyQt6.QtCore import (  # pylint: disable=import-error
-            Qt, QThread, pyqtSignal,
+            Qt, QThread, pyqtSignal, QRect, QPoint, QSize,
         )
         from PyQt6.QtGui import QFont  # pylint: disable=import-error
         PYQT_AVAILABLE = True
@@ -362,6 +362,83 @@ if not PYQT_AVAILABLE:
     def pyqtSignal(*_a, **_k):  # pylint: disable=invalid-name
         """Stub pyqtSignal."""
         return None
+    class FlowLayout:       # pylint: disable=too-few-public-methods
+        """Stub FlowLayout."""
+else:
+    class FlowLayout(QLayout):  # pylint: disable=too-many-public-methods
+        """Disposition en flux : les boutons s'enchaînent sur la ligne courante
+        et passent automatiquement à la suivante selon la largeur disponible.
+        Équivalent du 'flex-wrap' CSS pour les widgets Qt."""
+
+        def __init__(self, parent=None, h_spacing=8, v_spacing=6):
+            super().__init__(parent)
+            self._items     = []
+            self._h_spacing = h_spacing
+            self._v_spacing = v_spacing
+
+        # ── API QLayout ───────────────────────────────────────────────────────
+        def addItem(self, item):
+            self._items.append(item)
+
+        def count(self):
+            return len(self._items)
+
+        def itemAt(self, index):
+            if 0 <= index < len(self._items):
+                return self._items[index]
+            return None
+
+        def takeAt(self, index):
+            if 0 <= index < len(self._items):
+                return self._items.pop(index)
+            return None
+
+        def hasHeightForWidth(self):
+            return True
+
+        def heightForWidth(self, width):
+            return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+        def setGeometry(self, rect):
+            super().setGeometry(rect)
+            self._do_layout(rect, test_only=False)
+
+        def sizeHint(self):
+            return self.minimumSize()
+
+        def minimumSize(self):
+            size = QSize()
+            for item in self._items:
+                size = size.expandedTo(item.minimumSize())
+            m = self.contentsMargins()
+            return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+        # ── Calcul de disposition ─────────────────────────────────────────────
+        def _do_layout(self, rect, test_only):
+            m         = self.contentsMargins()
+            eff_x     = rect.x() + m.left()
+            eff_right = rect.right() - m.right()
+            x         = eff_x
+            y         = rect.y() + m.top()
+            row_h     = 0
+
+            for item in self._items:
+                hint   = item.sizeHint()
+                iw, ih = hint.width(), hint.height()
+
+                if x + iw > eff_right and row_h > 0:
+                    # Retour à la ligne
+                    x  = eff_x
+                    y += row_h + self._v_spacing
+                    row_h = 0
+
+                if not test_only:
+                    item.setGeometry(QRect(QPoint(x, y), hint))
+
+                x    += iw + self._h_spacing
+                row_h = max(row_h, ih)
+
+            return y + row_h - rect.y() + m.bottom()
 
 
 # ── Feuille de style (thème sombre anime) ────────────────────────────────────
@@ -853,9 +930,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addSpacing(6)
 
         self._ep_saison_container = QWidget()
-        self._ep_saison_vlay = QVBoxLayout(self._ep_saison_container)
-        self._ep_saison_vlay.setContentsMargins(0, 0, 0, 0)
-        self._ep_saison_vlay.setSpacing(6)
+        FlowLayout(self._ep_saison_container, h_spacing=8, v_spacing=6)
         self._ep_saison_container.setVisible(False)
         lay.addWidget(self._ep_saison_container)
         lay.addSpacing(14)
@@ -1039,9 +1114,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addSpacing(6)
 
         self._whatdl_saison_container = QWidget()
-        self._whatdl_saison_vlay = QVBoxLayout(self._whatdl_saison_container)
-        self._whatdl_saison_vlay.setContentsMargins(0, 0, 0, 0)
-        self._whatdl_saison_vlay.setSpacing(6)
+        FlowLayout(self._whatdl_saison_container, h_spacing=8, v_spacing=6)
         lay.addWidget(self._whatdl_saison_container)
         lay.addSpacing(14)
 
@@ -1145,31 +1218,19 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._go(self.PAGE_EP_INPUT)
 
     def _ep_rebuild_saison_btns(self):
-        vlay_s = self._ep_saison_vlay
-        while vlay_s.count():
-            item = vlay_s.takeAt(0)
+        lay_s = self._ep_saison_container.layout()
+        while lay_s.count():
+            item = lay_s.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._ep_saison_btns_ep = []
-
-        _MAX_PER_ROW = 6
-        for row_start in range(0, len(self._ep_saisons_ep), _MAX_PER_ROW):
-            row_w = QWidget()
-            row_w.setStyleSheet("background: transparent;")
-            row_h = QHBoxLayout(row_w)
-            row_h.setContentsMargins(0, 0, 0, 0)
-            row_h.setSpacing(8)
-            for i in range(row_start, min(row_start + _MAX_PER_ROW, len(self._ep_saisons_ep))):
-                k = self._ep_saisons_ep[i]
-                disp, _, _, _ = saison_key_info(k)
-                btn = QPushButton(disp)
-                btn.setFixedHeight(32)
-                btn.clicked.connect(lambda _c, idx=i: self._ep_pick_saison(idx))
-                row_h.addWidget(btn)
-                self._ep_saison_btns_ep.append(btn)
-            row_h.addStretch()
-            vlay_s.addWidget(row_w)
-
+        for i, k in enumerate(self._ep_saisons_ep):
+            disp, _, _, _ = saison_key_info(k)
+            btn = QPushButton(disp)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(lambda _c, idx=i: self._ep_pick_saison(idx))
+            lay_s.addWidget(btn)
+            self._ep_saison_btns_ep.append(btn)
         self._ep_refresh_saison_btns()
 
     def _ep_pick_saison(self, idx):
@@ -1317,31 +1378,21 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._whatdl_list.addItem("Depuis un épisode")
         self._whatdl_list.setCurrentRow(0)
 
-        # Reconstruction des boutons de saison (multi-lignes si beaucoup de saisons)
-        vlay_s = self._whatdl_saison_vlay
-        while vlay_s.count():
-            item = vlay_s.takeAt(0)
+        # Reconstruction des boutons de saison (FlowLayout adaptatif)
+        lay_s = self._whatdl_saison_container.layout()
+        while lay_s.count():
+            item = lay_s.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._whatdl_saison_btns = []
 
-        _MAX_PER_ROW = 6
-        for row_start in range(0, len(saisons), _MAX_PER_ROW):
-            row_w = QWidget()
-            row_w.setStyleSheet("background: transparent;")
-            row_h = QHBoxLayout(row_w)
-            row_h.setContentsMargins(0, 0, 0, 0)
-            row_h.setSpacing(8)
-            for i in range(row_start, min(row_start + _MAX_PER_ROW, len(saisons))):
-                k = saisons[i]
-                disp, _, _, _ = saison_key_info(k)
-                btn = QPushButton(disp)
-                btn.setFixedHeight(32)
-                btn.clicked.connect(lambda _checked, idx=i: self._whatdl_pick_saison(idx))
-                row_h.addWidget(btn)
-                self._whatdl_saison_btns.append(btn)
-            row_h.addStretch()
-            vlay_s.addWidget(row_w)
+        for i, k in enumerate(saisons):
+            disp, _, _, _ = saison_key_info(k)
+            btn = QPushButton(disp)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(lambda _checked, idx=i: self._whatdl_pick_saison(idx))
+            lay_s.addWidget(btn)
+            self._whatdl_saison_btns.append(btn)
 
         self._whatdl_saison_lbl.setVisible(nb_saisons > 1)
         self._whatdl_saison_container.setVisible(nb_saisons > 1)
@@ -1423,23 +1474,44 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                 n_x    = count_episodes(lang_data[skey_x])
 
                 def _ask_y(x):
-                    # Saison choisie à l'étape X → point de départ pour l'étape Y
+                    # Saison choisie à l'étape X
                     skey_from_x = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_x
-                    sel_from_x  = self._ep_sel_idx_ep if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else sel
-                    n_from_x    = count_episodes(lang_data[skey_from_x])
+                    _, _, _, typ_x = saison_key_info(skey_from_x)
+
+                    # Filtrer les saisons disponibles pour Y :
+                    #  - X = film  → Y = film uniquement (cohérence de type)
+                    #  - X = saison → Y = toutes sauf film
+                    if typ_x == "film":
+                        saisons_y = [k for k in saisons if saison_key_info(k)[3] == "film"]
+                    else:
+                        saisons_y = [k for k in saisons if saison_key_info(k)[3] != "film"]
+
+                    if not saisons_y:
+                        saisons_y = [skey_from_x]
+
+                    # Saison de départ pour Y : même que X si disponible, sinon première
+                    if skey_from_x in saisons_y:
+                        sel_y = saisons_y.index(skey_from_x)
+                    else:
+                        sel_y = 0
+
+                    skey_y0 = saisons_y[sel_y]
+                    n_y     = count_episodes(lang_data[skey_y0])
 
                     def _do_dl(y):
-                        # Saison éventuellement modifiée à l'étape Y
-                        actual_skey_y = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_from_x
+                        actual_skey_y = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey_y0
                         self._saison_key = actual_skey_y
                         self._start_dl(slug, data, lang, actual_skey_y, (x - 1, y - 1))
 
+                    # Afficher le sélecteur si plusieurs choix OU si X est un film
+                    # (dans ce cas on affiche "Film" pour que l'utilisateur comprenne le contexte)
+                    show_s_y = len(saisons_y) > 1 or typ_x == "film"
                     self._ask_ep(
-                        lambda n_: f"Épisode de fin (1-{n_})", n_from_x, 1, _do_dl,
+                        lambda n_: f"Épisode de fin (1-{n_})", n_y, 1, _do_dl,
                         mode_label="D'UN ÉPISODE X À Y  —  Choix de l'épisode de fin (Y)",
                         cancel_cb=_cancel,
                         back_action=_ask_x,
-                        show_saison=True, saisons=saisons, lang_data=lang_data, sel_idx=sel_from_x,
+                        show_saison=show_s_y, saisons=saisons_y, lang_data=lang_data, sel_idx=sel_y,
                     )
 
                 self._ask_ep(
