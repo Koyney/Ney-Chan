@@ -71,6 +71,24 @@ LOCAL_DB_DIR   = os.path.join(_BASE_DIR, "anime-sama")
 LOCAL_IDX_FILE = os.path.join(LOCAL_DB_DIR, "index.json")
 LOCAL_ANI_DIR  = os.path.join(LOCAL_DB_DIR, "animes")
 
+def _default_db_dir():
+    return os.path.join(_BASE_DIR, "anime-sama")
+
+def _set_db_dir(path):
+    """Met à jour les chemins de la base de données locale."""
+    global LOCAL_DB_DIR, LOCAL_IDX_FILE, LOCAL_ANI_DIR  # pylint: disable=global-statement
+    LOCAL_DB_DIR   = path
+    LOCAL_IDX_FILE = os.path.join(path, "index.json")
+    LOCAL_ANI_DIR  = os.path.join(path, "animes")
+
+def init_db_dir(cfg):
+    """Initialise le chemin de la base de données depuis la config."""
+    saved = cfg.get("db_dir", "")
+    if saved:
+        _set_db_dir(saved)
+    else:
+        _set_db_dir(_default_db_dir())
+
 ALL_LANGUAGES  = ["vf", "vostfr", "va", "vkr", "vcn", "vqc",
                   "vf1", "vf2", "vf3", "vf4", "vf5"]
 
@@ -989,6 +1007,40 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addLayout(row_dir)
         lay.addSpacing(20)
 
+        # ── Base de données locale ────────────────────────────────────────────
+        lbl_db = QLabel("BASE DE DONNÉES LOCALE")
+        lbl_db.setObjectName("section")
+        lay.addWidget(lbl_db)
+        lay.addSpacing(4)
+        hint_db = QLabel("Dossier contenant le sous-dossier anime-sama/ (index.json + animes/)")
+        hint_db.setStyleSheet("color:#556677; font-size:10px;")
+        lay.addWidget(hint_db)
+        lay.addSpacing(6)
+
+        row_db = QHBoxLayout()
+        self._set_db_edit = QLineEdit(LOCAL_DB_DIR)
+        self._set_db_edit.setPlaceholderText("Chemin du dossier de la base de données…")
+        self._set_db_edit.setFixedHeight(34)
+        self._set_db_edit.setMaximumWidth(420)
+        self._set_db_edit.returnPressed.connect(self._settings_apply_db)
+
+        btn_db_choose = QPushButton("📂 Choisir")
+        btn_db_choose.setFixedWidth(110)
+        btn_db_choose.clicked.connect(self._settings_choose_db)
+
+        btn_db_apply = QPushButton("✔ Appliquer")
+        btn_db_apply.setFixedWidth(105)
+        btn_db_apply.setObjectName("success")
+        btn_db_apply.clicked.connect(self._settings_apply_db)
+
+        row_db.addWidget(self._set_db_edit, 1)
+        row_db.addSpacing(6)
+        row_db.addWidget(btn_db_choose)
+        row_db.addSpacing(4)
+        row_db.addWidget(btn_db_apply)
+        lay.addLayout(row_db)
+        lay.addSpacing(20)
+
         # ── GitHub fallback ───────────────────────────────────────────────────
         lbl_gh = QLabel("GITHUB FALLBACK")
         lbl_gh.setObjectName("section")
@@ -1075,13 +1127,21 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addSpacing(12)
 
         row = QHBoxLayout()
+        row.setSpacing(16)
+
         self._dl_cancel_btn = QPushButton("✖  Annuler")
         self._dl_cancel_btn.setObjectName("danger")
+        self._dl_cancel_btn.setFixedHeight(42)
+        self._dl_cancel_btn.setMinimumWidth(130)
         self._dl_cancel_btn.clicked.connect(self._dl_cancel)
-        self._dl_done_btn   = QPushButton("✔  Terminé  —  Retour menu")
-        self._dl_done_btn.setObjectName("success")
-        self._dl_done_btn.setEnabled(False)
+
+        self._dl_done_btn = QPushButton()
+        self._dl_done_btn.setFixedHeight(42)
+        self._dl_done_btn.setMinimumWidth(260)
+        self._dl_done_btn.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
         self._dl_done_btn.clicked.connect(lambda: self._go(self.PAGE_MAIN))
+        self._dl_set_done(False)   # état initial : pas terminé
+
         row.addWidget(self._dl_cancel_btn)
         row.addStretch()
         row.addWidget(self._dl_done_btn)
@@ -1547,7 +1607,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_speed_lbl.setText("")
         self._dl_log.clear()
         self._dl_cancel_btn.setEnabled(True)
-        self._dl_done_btn.setEnabled(False)
+        self._dl_set_done(False)
         self._go(self.PAGE_DOWNLOAD)
 
         self._dl_thread = DownloadThread(
@@ -1581,7 +1641,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                 self._dl_overall.setRange(0, n)
                 self._dl_overall.setValue(0)
                 self._dl_cancel_btn.setEnabled(True)
-                self._dl_done_btn.setEnabled(False)
+                self._dl_set_done(False)
                 self._go(self.PAGE_DOWNLOAD)
 
                 self._dl_thread = DownloadThread(
@@ -1598,7 +1658,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         ok, fail = self._dl_queue_res
         self._dl_log.append(f"\n✔  Série complète terminée !  {ok} succès  /  {fail} échec(s)")
         self._dl_cancel_btn.setEnabled(False)
-        self._dl_done_btn.setEnabled(True)
+        self._dl_set_done(True)
 
     def _dl_queue_season_done(self, ok, fail):
         prev_ok, prev_fail = self._dl_queue_res
@@ -1623,6 +1683,35 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         else:
             self._dl_log.append(f"  ✖  {name}  — ÉCHEC")
 
+    def _dl_set_done(self, done: bool):
+        """Met à jour le bouton Terminé selon l'état du téléchargement."""
+        if done:
+            self._dl_done_btn.setText("✔   Terminé  —  Retour menu")
+            self._dl_done_btn.setEnabled(True)
+            self._dl_done_btn.setStyleSheet(
+                "QPushButton {"  # pylint: disable=implicit-str-concat
+                "  background-color: transparent; color: #00ff99;"
+                "  border: 1px solid #00ff99; border-radius: 8px;"
+                "  padding: 6px 24px;"
+                "  font-family: Consolas, 'Courier New', monospace;"
+                "}"
+                "QPushButton:hover {"
+                "  background-color: #00ff99; color: #0d0d1a;"
+                "  border-color: #00ff99;"
+                "}"
+            )
+        else:
+            self._dl_done_btn.setText("✖   Pas Terminé")
+            self._dl_done_btn.setEnabled(False)
+            self._dl_done_btn.setStyleSheet(
+                "QPushButton {"  # pylint: disable=implicit-str-concat
+                "  background-color: #1a0808; color: #ff4444;"
+                "  border: none; border-radius: 8px;"
+                "  padding: 6px 24px;"
+                "  font-family: Consolas, 'Courier New', monospace;"
+                "}"
+            )
+
     def _dl_all_done(self, ok, fail):
         self._dl_ep_bar.setValue(100)
         self._dl_overall.setValue(self._dl_overall.maximum())
@@ -1630,7 +1719,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_speed_lbl.setText("")
         self._dl_log.append(f"\n✔  Terminé !  {ok} succès  /  {fail} échec(s)")
         self._dl_cancel_btn.setEnabled(False)
-        self._dl_done_btn.setEnabled(True)
+        self._dl_set_done(True)
 
     def _dl_cancel(self):
         if self._dl_thread and self._dl_thread.isRunning():
@@ -1674,6 +1763,29 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
             self._refresh_status()
         except Exception as e:
             self._msg("Erreur dossier", str(e))
+
+    def _settings_choose_db(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Choisir le dossier de la base de données locale",
+            LOCAL_DB_DIR,
+        )
+        if path:
+            self._set_db_edit.setText(path)
+            self._settings_apply_db()
+
+    def _settings_apply_db(self):
+        path = self._set_db_edit.text().strip()
+        if not path:
+            return
+        try:
+            os.makedirs(path, exist_ok=True)
+            abs_path = os.path.abspath(path)
+            _set_db_dir(abs_path)
+            _save_config({"db_dir": abs_path})
+            self.cfg["db_dir"] = abs_path
+            self._set_db_edit.setText(abs_path)
+        except Exception as e:
+            self._msg("Erreur base de données", str(e))
 
     def _settings_toggle_gh(self):
         on = not self.cfg.get("github_fallback", False)
@@ -1886,6 +1998,7 @@ def main_gui():
             dest_ref[0] = saved
 
         win = NeyChanWindow(cfg, dest_ref, ffmpeg_exe or None)
+        init_db_dir(cfg)   # applique db_dir depuis la config
         win._go(NeyChanWindow.PAGE_MAIN)  # pylint: disable=protected-access
         win.show()
         win_holder[0] = win
@@ -1917,8 +2030,6 @@ def _load_config():
         return {}
 
 def _save_config(data):
-    if IS_TERMUX:
-        return  # Ne jamais créer/modifier de fichier config sur Termux/Android
     path = _config_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -2415,6 +2526,60 @@ def _pick_saison(saisons, lang_data, anime_name, lang):
         return None
     return saisons[idx]
 
+def _find_resume_point(dest_dir, anime_name, lang, anime_data):
+    """
+    Parcourt les dossiers locaux pour trouver le dernier episode
+    telecharge ou en cours (.part).
+    Retourne :
+      None         -> aucun fichier trouve (rien a reprendre)
+      "done"       -> tous les episodes sont deja presents
+      (si, ep_idx) -> (index saison dans la liste, index du prochain ep a telecharger)
+    """
+    lang_data = anime_data.get(lang, {})
+    saisons   = list(lang_data.keys())
+
+    last_si = -1
+    last_ep = -1
+
+    for si, sk in enumerate(saisons):
+        _, folder_name, _, _ = saison_key_info(sk)
+        ep_dir = os.path.join(dest_dir, f"{anime_name} {lang.upper()}", folder_name)
+        if not os.path.isdir(ep_dir):
+            continue
+        n = count_episodes(lang_data[sk])
+        for ep_idx in range(n - 1, -1, -1):
+            base_name = ep_filename(sk, ep_idx)
+            found = False
+            # Fichier complet (plusieurs extensions possibles)
+            for ext in (".mp4", ".mkv", ".webm", ".ts", ".avi"):
+                if os.path.exists(os.path.join(ep_dir, base_name + ext)):
+                    found = True
+                    break
+            # Fichier partiel en cours de telechargement
+            if not found:
+                for ext in (".mp4.part", ".mkv.part", ".webm.part", ".ts.part"):
+                    if os.path.exists(os.path.join(ep_dir, base_name + ext)):
+                        found = True
+                        break
+            if found:
+                last_si = si
+                last_ep = ep_idx
+                break  # on a le dernier ep de cette saison, on continue les suivantes
+
+    if last_si == -1:
+        return None  # Aucun fichier detecte
+
+    sk     = saisons[last_si]
+    n      = count_episodes(lang_data[sk])
+    next_ep = last_ep + 1
+
+    if next_ep < n:
+        return last_si, next_ep          # Il reste des episodes dans cette saison
+    if last_si + 1 < len(saisons):
+        return last_si + 1, 0            # Passer a la saison suivante
+    return "done"                        # Tout est deja telecharge
+
+
 def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_exe):
     lang_data = anime_data.get(lang, {})
     saisons   = list(lang_data.keys())
@@ -2427,7 +2592,20 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
     total_all    = sum(count_episodes(lang_data[k]) for k in saisons)
     saison_count = len(saisons)
 
+    # ── Detection du point de reprise ─────────────────────────────────────────
+    resume = _find_resume_point(dest_dir, anime_name, lang, anime_data)
+    if resume is None:
+        resume_label = "▶  Reprendre  (aucun telechargement detecte)"
+    elif resume == "done":
+        resume_label = "▶  Reprendre  (tout est deja telecharge)"
+    else:
+        r_si, r_ep = resume
+        r_sk = saisons[r_si]
+        r_d, _, _, _ = saison_key_info(r_sk)
+        resume_label = f"▶  Reprendre depuis {r_d} -- Episode {r_ep + 1}"
+
     choices = [
+        resume_label,
         f"Toute la serie  ({total_all} ep. -- {saison_count} saison(s))",
         "Une saison specifique",
         "Un episode specifique",
@@ -2440,7 +2618,42 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
         f"{anime_name}  --  {lang.upper()}  --  {total_all} episode(s)",
     )
 
+    # ── Reprendre depuis le dernier episode ───────────────────────────────────
     if choice == 0:
+        if resume is None:
+            ConsoleUI.result_screen([
+                f"  {ConsoleUI.YELLOW}⚠  Aucun episode telecharge trouve.{ConsoleUI.RESET}",
+                f"  {ConsoleUI.DIM}Lancez d'abord un telechargement.{ConsoleUI.RESET}",
+            ])
+            return
+        if resume == "done":
+            ConsoleUI.result_screen([
+                f"  {ConsoleUI.GREEN}✔  Tous les episodes sont deja telecharges !{ConsoleUI.RESET}",
+            ])
+            return
+        r_si, r_ep = resume
+        r_sk = saisons[r_si]
+        r_d, _, _, _ = saison_key_info(r_sk)
+        total_ok = total_fail = 0
+        # Finir la saison en cours depuis le prochain episode
+        n_r = count_episodes(lang_data[r_sk])
+        ok, fail = run_download(slug, anime_data, lang, r_sk,
+                                (r_ep, n_r - 1), dest_dir, anime_name, ffmpeg_exe)
+        total_ok += ok; total_fail += fail
+        # Telecharger les saisons suivantes en entier
+        for sk in saisons[r_si + 1:]:
+            n = count_episodes(lang_data[sk])
+            if n:
+                ok, fail = run_download(slug, anime_data, lang, sk,
+                                        (0, n - 1), dest_dir, anime_name, ffmpeg_exe)
+                total_ok += ok; total_fail += fail
+        ConsoleUI.result_screen([
+            f"  {ConsoleUI.GREEN}OK Reprise depuis {r_d} ep.{r_ep + 1} terminee !{ConsoleUI.RESET}",
+            f"  {ConsoleUI.DIM}{total_ok} succes  --  {total_fail} echec(s){ConsoleUI.RESET}",
+            f"  {ConsoleUI.DIM}Dossier : {dest_dir}{os.sep}{anime_name} {lang.upper()}{ConsoleUI.RESET}",
+        ])
+
+    elif choice == 1:
         total_ok = total_fail = 0
         for sk in saisons:
             n = count_episodes(lang_data[sk])
@@ -2454,7 +2667,7 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
             f"  {ConsoleUI.DIM}Dossier : {dest_dir}{os.sep}{anime_name} {lang.upper()}{ConsoleUI.RESET}",
         ])
 
-    elif choice == 1:
+    elif choice == 2:
         sk = _pick_saison(saisons, lang_data, anime_name, lang)
         if sk is None: return
         n = count_episodes(lang_data[sk])
@@ -2466,7 +2679,7 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
             f"  {ConsoleUI.DIM}{ok} succes  --  {fail} echec(s){ConsoleUI.RESET}",
         ])
 
-    elif choice == 2:
+    elif choice == 3:
         sk = _pick_saison(saisons, lang_data, anime_name, lang)
         if sk is None: return
         n  = count_episodes(lang_data[sk])
@@ -2475,7 +2688,7 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
         run_download(slug, anime_data, lang, sk,
                      (ep - 1, ep - 1), dest_dir, anime_name, ffmpeg_exe)
 
-    elif choice == 3:
+    elif choice == 4:
         sk = _pick_saison(saisons, lang_data, anime_name, lang)
         if sk is None: return
         n = count_episodes(lang_data[sk])
@@ -2490,7 +2703,7 @@ def menu_what_to_download(slug, anime_data, lang, dest_dir, anime_name, ffmpeg_e
             f"  {ConsoleUI.DIM}{ok} succes  --  {fail} echec(s){ConsoleUI.RESET}",
         ])
 
-    elif choice == 4:
+    elif choice == 5:
         sk = _pick_saison(saisons, lang_data, anime_name, lang)
         if sk is None: return
         n  = count_episodes(lang_data[sk])
@@ -2600,18 +2813,12 @@ def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
                        if GITHUB_TOKEN else f"{ConsoleUI.YELLOW}manquant (.env){ConsoleUI.RESET}")
         ffmpeg_info = os.path.basename(ffmpeg_exe) if ffmpeg_exe else "introuvable"
 
-        if IS_TERMUX:
-            opts = [
-                f"Dossier de telechargement   ({dest_dir_ref[0]})",
-                f"GitHub fallback : {github_etat}  [token : {token_ok}]",
-                "<  Retour",
-            ]
-        else:
-            opts = [
-                f"Dossier de telechargement   ({dest_dir_ref[0]})",
-                f"GitHub fallback : {github_etat}  [token : {token_ok}]",
-                "<  Retour",
-            ]
+        opts = [
+            f"Dossier de telechargement   ({dest_dir_ref[0]})",
+            f"Base de donnees locale      ({LOCAL_DB_DIR})",
+            f"GitHub fallback : {github_etat}  [token : {token_ok}]",
+            "<  Retour",
+        ]
         choice = ConsoleUI.navigate(opts, "PARAMETRES")
 
         if choice == 0:
@@ -2639,6 +2846,27 @@ def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
                     ConsoleUI.result_screen([f"  {ConsoleUI.RED}✖  {e}{ConsoleUI.RESET}"])
 
         elif choice == 1:
+            new_db = ConsoleUI.input_screen(
+                "BASE DE DONNÉES LOCALE",
+                "Chemin complet du dossier",
+                subtitle=f"Actuel : {LOCAL_DB_DIR}",
+                allow_esc=True,
+            )
+            if new_db:
+                try:
+                    os.makedirs(new_db, exist_ok=True)
+                    abs_db = os.path.abspath(new_db)
+                    _set_db_dir(abs_db)
+                    cfg["db_dir"] = abs_db
+                    _save_config({"db_dir": abs_db})
+                    ConsoleUI.result_screen([
+                        f"  {ConsoleUI.GREEN}✔  Base de donnees mise a jour.{ConsoleUI.RESET}",
+                        f"  {ConsoleUI.CYAN}   {abs_db}{ConsoleUI.RESET}",
+                    ])
+                except Exception as e:
+                    ConsoleUI.result_screen([f"  {ConsoleUI.RED}✖  {e}{ConsoleUI.RESET}"])
+
+        elif choice == 2:
             if not GITHUB_TOKEN:
                 ConsoleUI.result_screen([
                     f"  {ConsoleUI.YELLOW}⚠  GitHub fallback desactive automatiquement.{ConsoleUI.RESET}",
@@ -2647,8 +2875,7 @@ def menu_settings(dest_dir_ref, cfg, ffmpeg_exe):
                 ])
             else:
                 cfg["github_fallback"] = not github_on
-                if not IS_TERMUX:
-                    _save_config({"github_fallback": cfg["github_fallback"]})
+                _save_config({"github_fallback": cfg["github_fallback"]})
                 etat = "active" if cfg["github_fallback"] else "desactive"
                 ConsoleUI.result_screen([
                     f"  {ConsoleUI.GREEN}✔  GitHub fallback {etat}.{ConsoleUI.RESET}",
@@ -2790,6 +3017,7 @@ def main():
     cfg      = _load_config()
     dest_dir = [init_dest_dir(cfg)]
     cfg      = _load_config()
+    init_db_dir(cfg)
 
     while True:
         github_etat = "ON" if cfg.get("github_fallback") else "OFF"
