@@ -984,27 +984,27 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addWidget(lbl_dir)
         lay.addSpacing(6)
 
-        row_dir = QHBoxLayout()
         self._set_dir_edit = QLineEdit(self.dest_dir_ref[0] if self.dest_dir_ref else "")
         self._set_dir_edit.setPlaceholderText("Chemin du dossier de téléchargement…")
         self._set_dir_edit.setFixedHeight(34)
-        self._set_dir_edit.setMaximumWidth(420)
         self._set_dir_edit.returnPressed.connect(self._settings_apply_dir)
+        lay.addWidget(self._set_dir_edit)
+        lay.addSpacing(6)
 
-        btn_choose = QPushButton("📂 Choisir")
-        btn_choose.setFixedWidth(110)
-        btn_choose.clicked.connect(self._settings_choose_dir)
+        row_dir = QHBoxLayout()
+        btn_apply_dir = QPushButton("✔  Appliquer")
+        btn_apply_dir.setFixedWidth(130)
+        btn_apply_dir.setObjectName("success")
+        btn_apply_dir.clicked.connect(self._settings_apply_dir)
 
-        btn_apply = QPushButton("✔ Appliquer")
-        btn_apply.setFixedWidth(105)
-        btn_apply.setObjectName("success")
-        btn_apply.clicked.connect(self._settings_apply_dir)
+        btn_choose_dir = QPushButton("📂  Choisir")
+        btn_choose_dir.setFixedWidth(120)
+        btn_choose_dir.clicked.connect(self._settings_choose_dir)
 
-        row_dir.addWidget(self._set_dir_edit, 1)
+        row_dir.addWidget(btn_apply_dir)
         row_dir.addSpacing(6)
-        row_dir.addWidget(btn_choose)
-        row_dir.addSpacing(4)
-        row_dir.addWidget(btn_apply)
+        row_dir.addWidget(btn_choose_dir)
+        row_dir.addStretch()
         lay.addLayout(row_dir)
         lay.addSpacing(20)
 
@@ -1018,27 +1018,27 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         lay.addWidget(hint_db)
         lay.addSpacing(6)
 
-        row_db = QHBoxLayout()
         self._set_db_edit = QLineEdit(LOCAL_DB_DIR)
         self._set_db_edit.setPlaceholderText("Chemin du dossier de la base de données…")
         self._set_db_edit.setFixedHeight(34)
-        self._set_db_edit.setMaximumWidth(420)
         self._set_db_edit.returnPressed.connect(self._settings_apply_db)
+        lay.addWidget(self._set_db_edit)
+        lay.addSpacing(6)
 
-        btn_db_choose = QPushButton("📂 Choisir")
-        btn_db_choose.setFixedWidth(110)
-        btn_db_choose.clicked.connect(self._settings_choose_db)
-
-        btn_db_apply = QPushButton("✔ Appliquer")
-        btn_db_apply.setFixedWidth(105)
+        row_db = QHBoxLayout()
+        btn_db_apply = QPushButton("✔  Appliquer")
+        btn_db_apply.setFixedWidth(130)
         btn_db_apply.setObjectName("success")
         btn_db_apply.clicked.connect(self._settings_apply_db)
 
-        row_db.addWidget(self._set_db_edit, 1)
+        btn_db_choose = QPushButton("📂  Choisir")
+        btn_db_choose.setFixedWidth(120)
+        btn_db_choose.clicked.connect(self._settings_choose_db)
+
+        row_db.addWidget(btn_db_apply)
         row_db.addSpacing(6)
         row_db.addWidget(btn_db_choose)
-        row_db.addSpacing(4)
-        row_db.addWidget(btn_db_apply)
+        row_db.addStretch()
         lay.addLayout(row_db)
         lay.addSpacing(20)
 
@@ -1204,6 +1204,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 
     def _go_settings(self):
         self._set_dir_edit.setText(self.dest_dir_ref[0] if self.dest_dir_ref else "")
+        self._set_db_edit.setText(LOCAL_DB_DIR)
         self._refresh_gh_btn()
         self._go(self.PAGE_SETTINGS)
 
