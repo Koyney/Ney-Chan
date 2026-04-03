@@ -755,10 +755,30 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._stack = QStackedWidget()
         vlay.addWidget(self._stack, 1)
 
+        # ── Barre de statut permanente (bas de fenêtre) ───────────────────────
+        status_bar = QWidget()
+        status_bar.setStyleSheet("border-top: 1px solid #1e1e3a; background: #080814;")
+        status_bar.setFixedHeight(36)
+        slay = QHBoxLayout(status_bar)
+        slay.setContentsMargins(14, 0, 14, 0)
+        slay.setSpacing(10)
+
+        self._open_folder_btn = QPushButton("📂  Ouvrir le dossier")
+        self._open_folder_btn.setFixedHeight(24)
+        self._open_folder_btn.setStyleSheet(
+            "QPushButton { color:#00d4ff; border:1px solid #00d4ff44; border-radius:4px;"
+            " padding:0px 10px; font-size:10px;"
+            " font-family:Consolas,'Courier New',monospace; background:transparent; }"
+            "QPushButton:hover { background:#00d4ff; color:#0d0d1a; }"
+        )
+        self._open_folder_btn.clicked.connect(self._open_dest_folder)
+
         self._status_lbl = QLabel()
         self._status_lbl.setObjectName("subtitle")
-        self._status_lbl.setContentsMargins(14, 4, 14, 4)
-        vlay.addWidget(self._status_lbl)
+
+        slay.addWidget(self._open_folder_btn)
+        slay.addWidget(self._status_lbl, 1)
+        vlay.addWidget(status_bar)
 
         for builder in (
             self._build_page_init,
@@ -801,9 +821,21 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         return frame
 
     def _refresh_status(self):
-        dest   = self.dest_dir_ref[0] if self.dest_dir_ref else "—"
         github = "GitHub: ON" if self.cfg.get("github_fallback") else "GitHub: OFF"
-        self._status_lbl.setText(f"  {dest}   |   {github}")
+        self._status_lbl.setText(f"  {github}")
+
+    def _open_dest_folder(self):
+        """Ouvre le dossier de téléchargement dans l'explorateur de fichiers."""
+        path = self.dest_dir_ref[0] if self.dest_dir_ref else ""
+        if not path or not os.path.isdir(path):
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception:
+                return
+        if IS_WINDOWS:
+            os.startfile(path)  # pylint: disable=no-member
+        else:
+            subprocess.Popen(["xdg-open", path])
 
     # ── Constructeurs de pages ─────────────────────────────────────────────────
 
