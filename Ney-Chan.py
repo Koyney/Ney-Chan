@@ -640,6 +640,9 @@ class DownloadThread(QThread):
         global _qt_progress_callback  # pylint: disable=global-statement
 
         def _hook(d):
+            # Bug-fix 2 : aborter le téléchargement yt-dlp dès l'annulation
+            if self._cancelled:
+                raise Exception("Téléchargement annulé par l'utilisateur")  # pylint: disable=broad-exception-raised
             if d["status"] == "downloading":
                 pct_str = d.get("_percent_str", "0%").strip()
                 speed   = d.get("_speed_str",   "").strip()
@@ -666,7 +669,11 @@ class DownloadThread(QThread):
                 ok = download_episode(
                     self.slug, self.saison_key, ep_idx, blocs,
                     self.dest_dir, self.anime_name, self.lang, self.ffmpeg_exe,
+                    cancel_fn=lambda: self._cancelled,  # Bug-fix 2
                 )
+                # Bug-fix 2 : vérifier l'annulation juste après le retour de yt-dlp
+                if self._cancelled:
+                    break
                 self.ep_done.emit(ok, base_name)
                 if ok:
                     success += 1
@@ -731,6 +738,11 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._ep_lang_data_ep     = {}
         self._ep_sel_idx_ep       = 0
         self._ep_saison_btns_ep   = []
+        # Bug-fix 1 : min d'épisode variable selon la saison (X→Y)
+        self._ep_min_override     = None   # callable(saison_key) → int | None
+
+        # Bug-fix 4 : compteur pour la progression globale intra-épisode
+        self._dl_current_ep_num   = 0
 
         self._setup_window()
         self._build_ui()
@@ -1268,7 +1280,8 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                 mode_label="NUMÉRO D'ÉPISODE",
                 cancel_cb=None,
                 back_action=None,
-                show_saison=False, saisons=None, lang_data=None, sel_idx=0):
+                show_saison=False, saisons=None, lang_data=None, sel_idx=0,
+                min_override_fn=None):
         """Affiche la page saisie d'épisode (version enrichie).
 
         prompt_fn_or_str : str fixe OU callable(n) → str
@@ -1288,6 +1301,9 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._ep_spin.setValue(min_val)
         self._ep_cb   = callback
         self._ep_back = self._stack.currentIndex()
+
+        # Bug-fix 1 : override du minimum selon la saison sélectionnée (ex. X→Y)
+        self._ep_min_override = min_override_fn
 
         # Annuler haut-gauche
         self._ep_cancel_cb = cancel_cb
@@ -1331,8 +1347,14 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._ep_sel_idx_ep = idx
         skey = self._ep_saisons_ep[idx]
         n    = count_episodes(self._ep_lang_data_ep[skey])
-        self._ep_spin.setRange(1, n)
-        self._ep_spin.setValue(1)
+        # Bug-fix 1 : respecter le minimum imposé par X quand même saison
+        min_val = 1
+        if callable(self._ep_min_override):
+            override = self._ep_min_override(skey)
+            if override is not None:
+                min_val = max(1, override)
+        self._ep_spin.setRange(min_val, n)
+        self._ep_spin.setValue(min_val)
         if self._ep_prompt_fn:
             self._ep_sub_lbl.setText(self._ep_prompt_fn(n))
         self._ep_refresh_saison_btns()
@@ -1631,12 +1653,17 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                     # Afficher le sélecteur si plusieurs choix OU si X est un film
                     # (dans ce cas on affiche "Film" pour que l'utilisateur comprenne le contexte)
                     show_s_y = len(saisons_y) > 1 or typ_x == "film"
+                    # Bug-fix 1 : Y ≥ X quand même saison que X, sinon min = 1
+                    _min_override = lambda skey, _sx=skey_from_x, _x=x: _x if skey == _sx else 1  # pylint: disable=unnecessary-lambda-assignment
+                    # Minimum initial : x si même saison que X, 1 sinon
+                    initial_min_y = x if skey_y0 == skey_from_x else 1
                     self._ask_ep(
-                        lambda n_: f"Épisode de fin (1-{n_})", n_y, 1, _do_dl,
+                        lambda n_: f"Épisode de fin (1-{n_})", n_y, initial_min_y, _do_dl,
                         mode_label="D'UN ÉPISODE X À Y  —  Choix de l'épisode de fin (Y)",
                         cancel_cb=_cancel,
                         back_action=_ask_x,
                         show_saison=show_s_y, saisons=saisons_y, lang_data=lang_data, sel_idx=sel_y,
+                        min_override_fn=_min_override,
                     )
 
                 self._ask_ep(
@@ -1666,8 +1693,10 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_title_lbl.setText("TÉLÉCHARGEMENT EN COURS")
         self._dl_anime_lbl.setText(f"{self._anime_name}  —  {lang.upper()}  —  {disp}")
         self._dl_ep_lbl.setText("Préparation…")
-        self._dl_overall.setRange(0, total)
+        # Bug-fix 4 : plage ×100 pour intégrer la progression intra-épisode
+        self._dl_overall.setRange(0, total * 100)
         self._dl_overall.setValue(0)
+        self._dl_current_ep_num = 0
         self._dl_ep_bar.setValue(0)
         self._dl_speed_lbl.setText("")
         self._dl_log.clear()
@@ -1708,8 +1737,10 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_anime_lbl.setText(f"{self._anime_name}  —  {lang.upper()}  —  {disp}")
         self._dl_ep_lbl.setText("Préparation…")
         total = n_r - start_ep
-        self._dl_overall.setRange(0, total)
+        # Bug-fix 4 : plage ×100 pour intégrer la progression intra-épisode
+        self._dl_overall.setRange(0, total * 100)
         self._dl_overall.setValue(0)
+        self._dl_current_ep_num = 0
         self._dl_ep_bar.setValue(0)
         self._dl_speed_lbl.setText("")
         self._dl_log.clear()
@@ -1740,8 +1771,10 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                     f"{self._anime_name}  —  {lang.upper()}  —  {disp}"
                 )
                 self._dl_ep_bar.setValue(0)
-                self._dl_overall.setRange(0, n)
+                # Bug-fix 4 : plage ×100 pour intégrer la progression intra-épisode
+                self._dl_overall.setRange(0, n * 100)
                 self._dl_overall.setValue(0)
+                self._dl_current_ep_num = 0
                 self._dl_cancel_btn.setEnabled(True)
                 self._dl_set_done(False)
                 self._go(self.PAGE_DOWNLOAD)
@@ -1769,17 +1802,23 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 
     def _dl_ep_start(self, current, total, name):
         self._dl_ep_lbl.setText(f"Épisode {current} / {total}  —  {name}")
-        self._dl_overall.setValue(current - 1)
+        # Bug-fix 4 : stocker la base ×100 pour la progression intra-épisode
+        self._dl_current_ep_num = current - 1
+        self._dl_overall.setValue(self._dl_current_ep_num * 100)
         self._dl_ep_bar.setValue(0)
         self._dl_log.append(f"[{current}/{total}]  {name}")
 
     def _dl_ep_prog(self, pct, speed, eta):
         self._dl_ep_bar.setValue(int(pct))
+        # Bug-fix 4 : progression globale = épisodes terminés + fraction de l'épisode courant
+        self._dl_overall.setValue(self._dl_current_ep_num * 100 + int(pct))
         parts = [p for p in (speed, f"ETA {eta}" if eta else "") if p]
         self._dl_speed_lbl.setText("   ".join(parts))
 
     def _dl_ep_done(self, ok, name):
-        self._dl_overall.setValue(self._dl_overall.value() + 1)
+        # Bug-fix 4 : avancer d'un épisode complet dans la barre globale
+        self._dl_current_ep_num += 1
+        self._dl_overall.setValue(self._dl_current_ep_num * 100)
         if ok:
             self._dl_log.append(f"  ✔  {name}.mp4")
         else:
@@ -1909,7 +1948,10 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         """Arrête proprement le thread de téléchargement à la fermeture."""
         if self._dl_thread and self._dl_thread.isRunning():
             self._dl_thread.cancel()
-            self._dl_thread.wait(3000)
+            # Bug-fix 3 : attente courte ; si le thread ne répond pas, on le force
+            if not self._dl_thread.wait(2000):
+                self._dl_thread.terminate()
+                self._dl_thread.wait(500)
         event.accept()
 
 
@@ -2511,7 +2553,7 @@ def _download_url(url, out_path, ffmpeg_exe=None):
 
 
 def download_episode(slug, saison_key, ep_idx, blocs, dest_dir,
-                     anime_name, lang, ffmpeg_exe=None):
+                     anime_name, lang, ffmpeg_exe=None, cancel_fn=None):
     """
     Tente le telechargement d'un episode :
     1. Essaie les blocs dans l'ordre (vidmoly en dernier)
@@ -2528,23 +2570,35 @@ def download_episode(slug, saison_key, ep_idx, blocs, dest_dir,
         return True
 
     def _try_url(url):
+        # Bug-fix 2 : ne pas lancer si déjà annulé
+        if cancel_fn and cancel_fn():
+            return False
         lecteur = get_lecteur(url)
         print(f"  {ConsoleUI.DIM}  Lecteur : {lecteur}{ConsoleUI.RESET}")
         return _download_url(url, out_path, ffmpeg_exe)
 
     order = sort_blocs_vidmoly_last(blocs)
     for bi in order:
+        # Bug-fix 2 : sortir de la boucle dès l'annulation
+        if cancel_fn and cancel_fn():
+            return False
         bloc = blocs[bi]
         if ep_idx < len(bloc):
             if _try_url(bloc[ep_idx]):
                 ConsoleUI.success(f"{base_name}.mp4 telecharge.")
                 return True
 
+    # Bug-fix 2 : ne pas re-scraper si annulé
+    if cancel_fn and cancel_fn():
+        return False
+
     ConsoleUI.warn("Tous les lecteurs ont echoue -- re-scrape anime-sama...")
     fresh_blocs = scrape_saison_data(slug, lang, saison_key)
     if fresh_blocs:
         order2 = sort_blocs_vidmoly_last(fresh_blocs)
         for bi in order2:
+            if cancel_fn and cancel_fn():
+                return False
             bloc = fresh_blocs[bi]
             if ep_idx < len(bloc):
                 if _try_url(bloc[ep_idx]):
