@@ -721,6 +721,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._whatdl_sel_idx      = 0
         self._whatdl_back         = None
         self._whatdl_saison_btns  = []
+        self._whatdl_resume       = None   # point de reprise détecté
 
         # État étendu de la page saisie d'épisode
         self._ep_cancel_cb        = None   # Annuler (haut-gauche) → QUE TELECHARGER ?
@@ -1430,12 +1431,27 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 
         self._whatdl_sub_lbl.setText(f"{self._anime_name}  —  {lang.upper()}")
 
+        # ── Détection du point de reprise ─────────────────────────────────────
+        resume = _find_resume_point(
+            self.dest_dir_ref[0], self._anime_name, lang, self._anime_data
+        )
+        self._whatdl_resume = resume
+        if resume is None:
+            resume_label = "▶  Reprendre  (aucun téléchargement détecté)"
+        elif resume == "done":
+            resume_label = "▶  Reprendre  (tout est déjà téléchargé ✔)"
+        else:
+            r_si, r_ep = resume
+            r_d, _, _, _ = saison_key_info(saisons[r_si])
+            resume_label = f"▶  Reprendre depuis {r_d} — Épisode {r_ep + 1}"
+
         self._whatdl_list.clear()
-        self._whatdl_list.addItem(f"Toute la série  ({total_all} ep. — {nb_saisons} saison(s))")
-        self._whatdl_list.addItem("")          # "Toute la saison", mis à jour par _whatdl_refresh
-        self._whatdl_list.addItem("Un épisode spécifique")
-        self._whatdl_list.addItem("D'un épisode X à Y")
-        self._whatdl_list.addItem("Depuis un épisode")
+        self._whatdl_list.addItem(resume_label)                                            # row 0
+        self._whatdl_list.addItem(f"Toute la série  ({total_all} ep. — {nb_saisons} saison(s))")  # row 1
+        self._whatdl_list.addItem("")          # "Toute la saison", mis à jour par _whatdl_refresh  # row 2
+        self._whatdl_list.addItem("Un épisode spécifique")                                 # row 3
+        self._whatdl_list.addItem("D'un épisode X à Y")                                   # row 4
+        self._whatdl_list.addItem("Depuis un épisode")                                    # row 5
         self._whatdl_list.setCurrentRow(0)
 
         # Reconstruction des boutons de saison (FlowLayout adaptatif)
@@ -1467,7 +1483,8 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         skey      = saisons[sel]
         n         = count_episodes(lang_data[skey])
 
-        item = self._whatdl_list.item(1)
+        # "Toute la saison" est désormais à l'index 2 (index 0 = Reprendre)
+        item = self._whatdl_list.item(2)
         if item:
             item.setText(f"Toute la saison  ({n} épisode(s))")
 
@@ -1506,14 +1523,29 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         _cancel = lambda: self._go(self.PAGE_WHAT_DL)  # pylint: disable=unnecessary-lambda-assignment
 
         if row == 0:
+            # ── Reprendre depuis le dernier épisode téléchargé ────────────────
+            resume = self._whatdl_resume
+            if resume is None:
+                self._msg("Aucun téléchargement détecté",
+                          "Aucun épisode téléchargé trouvé dans le dossier de destination.\n"
+                          "Lancez d'abord un téléchargement.")
+                return
+            if resume == "done":
+                self._msg("Déjà téléchargé",
+                          "Tous les épisodes sont déjà téléchargés !")
+                return
+            r_si, r_ep = resume
+            self._start_resume(slug, data, lang, saisons, lang_data, r_si, r_ep)
+
+        elif row == 1:
             # Toute la série
             self._start_series(slug, data, lang, saisons, lang_data)
 
-        elif row == 1:
+        elif row == 2:
             # Toute la saison sélectionnée
             self._start_dl(slug, data, lang, skey, (0, n - 1))
 
-        elif row == 2:
+        elif row == 3:
             # Un épisode spécifique — avec sélecteur de saison
             def _do_ep_specific(ep):
                 actual_skey = self._ep_saisons_ep[self._ep_sel_idx_ep] if self._ep_saison_lbl.isVisible() and self._ep_saisons_ep else skey
@@ -1527,7 +1559,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
                 show_saison=True, saisons=saisons, lang_data=lang_data, sel_idx=sel,
             )
 
-        elif row == 3:
+        elif row == 4:
             # D'un épisode X à Y — sélecteur de saison sur étape X, Retour sur étape Y
             def _ask_x():
                 skey_x = saisons[sel]
@@ -1583,7 +1615,7 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
 
             _ask_x()
 
-        elif row == 4:
+        elif row == 5:
             # Depuis un épisode
             self._ask_ep(
                 lambda n_: f"Depuis l'épisode (1-{n_})", n, 1,
@@ -1626,6 +1658,43 @@ class NeyChanWindow(QMainWindow):  # pylint: disable=too-many-instance-attribute
         self._dl_queue_ctx = (slug, anime_data, lang, lang_data)
         self._dl_queue_res = (0, 0)
         self._next_in_queue()
+
+    def _start_resume(self, slug, anime_data, lang, saisons, lang_data, start_si, start_ep):
+        """Reprend le téléchargement depuis start_ep dans saisons[start_si], puis
+        enchaîne toutes les saisons suivantes depuis leur début."""
+        r_sk = saisons[start_si]
+        n_r  = count_episodes(lang_data[r_sk])
+        disp, _, _, _ = saison_key_info(r_sk)
+
+        # Les saisons après la première seront traitées via la file habituelle
+        self._dl_queue     = list(saisons[start_si + 1:])
+        self._dl_queue_ctx = (slug, anime_data, lang, lang_data)
+        self._dl_queue_res = (0, 0)
+
+        self._dl_title_lbl.setText("TÉLÉCHARGEMENT EN COURS  —  REPRISE")
+        self._dl_anime_lbl.setText(f"{self._anime_name}  —  {lang.upper()}  —  {disp}")
+        self._dl_ep_lbl.setText("Préparation…")
+        total = n_r - start_ep
+        self._dl_overall.setRange(0, total)
+        self._dl_overall.setValue(0)
+        self._dl_ep_bar.setValue(0)
+        self._dl_speed_lbl.setText("")
+        self._dl_log.clear()
+        self._dl_log.append(f"▶  Reprise depuis {disp} — Épisode {start_ep + 1}")
+        self._dl_cancel_btn.setEnabled(True)
+        self._dl_set_done(False)
+        self._go(self.PAGE_DOWNLOAD)
+
+        self._dl_thread = DownloadThread(
+            slug, anime_data, lang, r_sk, (start_ep, n_r - 1),
+            self.dest_dir_ref[0], self._anime_name, self.ffmpeg_exe, self,
+        )
+        self._dl_thread.ep_start.connect(self._dl_ep_start)
+        self._dl_thread.ep_progress.connect(self._dl_ep_prog)
+        self._dl_thread.ep_done.connect(self._dl_ep_done)
+        # Quand la première saison est terminée, continuer la file
+        self._dl_thread.all_done.connect(self._dl_queue_season_done)
+        self._dl_thread.start()
 
     def _next_in_queue(self):
         slug, anime_data, lang, lang_data = self._dl_queue_ctx
